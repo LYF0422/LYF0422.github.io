@@ -3,9 +3,11 @@ import { categories } from "@/data/categories";
 import { studioConfig } from "@/data/studio";
 import { getAssetPath } from "@/utils/withBase";
 import StudioEntryPanel from "@/components/StudioEntryPanel.astro";
+import StudioLibraryTools from "@/components/StudioLibraryTools.astro";
 import "@/styles/global.css";
 import "@/styles/studio.css";
 import "@/styles/collections.css";
+import "@/styles/studio-writing.css";
 ---
 
 <!doctype html>
@@ -43,6 +45,7 @@ import "@/styles/collections.css";
         <span id="save-status" role="status">正在打开写作台…</span><button
           id="connect-button"
           class="studio-button">连接 GitHub</button
+        ><button id="sync-draft-button" class="studio-button">存草稿</button
         ><button id="publish-button" class="studio-button studio-primary"
           >发布 <span aria-hidden="true">↗</span></button
         >
@@ -110,11 +113,41 @@ import "@/styles/collections.css";
                 aria-pressed="false">预览</button
               >
             </div><button
-              id="toggle-inspector"
-              class="studio-button"
-              aria-label="文章设置"
-              >设置 <span aria-hidden="true">⚙</span></button
+              id="focus-writing"
+              class="studio-text-button"
+              aria-pressed="false">专注</button
             >
+            <details id="publish-options" class="publish-options">
+              <summary>发布选项</summary>
+              <div class="publish-popover" id="inspector" aria-label="发布选项">
+                <div class="sync-panel">
+                  <div>
+                    <strong>同步与发布</strong><span id="connection-status"
+                      >未连接</span
+                    >
+                  </div>
+                  <label class="studio-checkbox"
+                    ><input id="auto-sync" type="checkbox" /> 修改后自动同步</label
+                  >
+                  <p>停止输入 10 秒后同步，新记录先存为草稿。</p>
+                  <button id="reload-remote" class="studio-text-button" hidden
+                    >从 GitHub 重新载入</button
+                  >
+                  <p id="sync-result" role="status"></p>
+                  <a
+                    id="commit-link"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    hidden>查看本次提交 ↗</a
+                  >
+                  <a
+                    href={`https://github.com/${studioConfig.repository}/actions`}
+                    target="_blank"
+                    rel="noopener noreferrer">网站部署进度 ↗</a
+                  >
+                </div>
+              </div>
+            </details>
           </div>
         </div>
         <div
@@ -179,6 +212,11 @@ import "@/styles/collections.css";
           ><button data-command="codeBlock" aria-label="代码块" title="代码块"
             >{}</button
           >
+          <select id="document-line-height" aria-label="正文行距"
+            ><option value="1.7">行距 1.7</option><option value="2"
+              >行距 2.0</option
+            ><option value="2.3">行距 2.3</option></select
+          >
           <div class="toolbar-divider"></div><button
             data-command="undo"
             aria-label="撤销"
@@ -241,26 +279,84 @@ import "@/styles/collections.css";
             <p>来源若限制内嵌，可打开原文或上传 PDF。</p>
           </aside>
           <article class="writing-paper" id="writing-paper">
-            <label class="quick-category"
-              ><span class="sr-only">记录分类</span><select
-                id="quick-category"
-                aria-label="记录分类"
-                >{
-                  categories.map(category => (
-                    <option value={category.id}>{category.title}</option>
-                  ))
-                }</select
-              ></label
+            <fieldset id="metadata-fields" class="article-metadata">
+              <div class="article-meta-row">
+                <label class="quick-category"
+                  ><span class="sr-only">记录分类</span><select
+                    id="quick-category"
+                    aria-label="记录分类"
+                    >{
+                      categories.map(category => (
+                        <option value={category.id}>{category.title}</option>
+                      ))
+                    }</select
+                  ></label
+                >
+                <label class="inline-tags"
+                  ><span>标签</span><input
+                    id="document-tags"
+                    aria-label="文章标签"
+                    placeholder="添加标签，用逗号分隔"
+                  /></label
+                >
+              </div>
+              <p class="sr-only" id="paper-category">NOTES / 随笔与想法</p>
+              <textarea
+                id="document-title"
+                rows="1"
+                placeholder="给这篇记录一个标题"
+                aria-label="文章标题"></textarea>
+              <textarea
+                id="document-description"
+                class="document-description"
+                rows="1"
+                maxlength="300"
+                aria-label="一句话简介"
+                placeholder="添加一句话简介…"></textarea>
+              <details class="article-options" id="article-options">
+                <summary>封面与文章选项</summary>
+                <div class="article-options-grid">
+                  <label class="studio-field"
+                    >文件名<input
+                      id="document-slug"
+                      placeholder="根据标题自动生成"
+                    /><small>同步后保持文件名不变。</small></label
+                  >
+                  <label class="studio-field"
+                    >发布时间<input
+                      id="document-date"
+                      type="datetime-local"
+                    /><small>按当前设备时区输入，未来时间会定时展示。</small
+                    ></label
+                  >
+                  <div class="studio-field">
+                    <span>文章封面</span><div
+                      class="cover-preview"
+                      id="cover-preview"
+                    >
+                      <span>从图片中选择一张封面</span>
+                    </div><div class="cover-actions">
+                      <button id="choose-cover" type="button">选择图片</button
+                      ><button id="remove-cover" type="button">移除封面</button>
+                    </div>
+                  </div>
+                  <label class="studio-checkbox"
+                    ><input id="document-featured" type="checkbox" /> 设为精选记录</label
+                  >
+                </div>
+                <button
+                  id="delete-local-document"
+                  type="button"
+                  class="studio-text-button local-delete">删除本机记录</button
+                >
+              </details>
+            </fieldset>
+            <div class="paper-rule"></div><StudioEntryPanel /><h2
+              id="template-heading"
+              class="template-heading"
             >
-            <p class="eyebrow paper-eyebrow" id="paper-category">
-              NOTES / 随笔与想法
-            </p><textarea
-              id="document-title"
-              rows="1"
-              placeholder="给这篇记录一个标题"
-              aria-label="文章标题"></textarea><div class="paper-rule">
-            </div><StudioEntryPanel /><div id="rich-editor" class="rich-editor">
-            </div><div
+              正文
+            </h2><div id="rich-editor" class="rich-editor"></div><div
               id="article-preview"
               class="app-prose studio-article-preview"
               hidden
@@ -278,104 +374,6 @@ import "@/styles/collections.css";
           >
         </div>
       </main>
-      <aside class="studio-inspector" id="inspector" aria-label="文章设置">
-        <div class="inspector-heading">
-          <span class="eyebrow">THE DETAILS</span><button
-            id="close-inspector"
-            class="studio-icon"
-            aria-label="关闭文章设置">×</button
-          >
-        </div><h2>把记录整理好<span class="heading-period">.</span></h2>
-        <fieldset id="metadata-fields">
-          <label class="studio-field"
-            >分类<select id="document-category"
-              >{
-                categories.map(category => (
-                  <option value={category.id}>
-                    {category.title} · {category.subtitle}
-                  </option>
-                ))
-              }</select
-            ></label
-          >
-          <label class="studio-field"
-            >一句话简介<textarea
-              id="document-description"
-              rows="3"
-              maxlength="300"
-              placeholder="这篇记录，想留下些什么？"></textarea></label
-          >
-          <label class="studio-field"
-            >标签<input
-              id="document-tags"
-              placeholder="用逗号分隔，例如：anime, 随笔"
-            /></label
-          >
-          <label class="studio-field"
-            >文件名<input
-              id="document-slug"
-              placeholder="根据标题自动生成"
-            /><small>同步后保持文件名不变。</small></label
-          >
-          <label class="studio-field"
-            >发布时间<input id="document-date" type="datetime-local" /><small
-              >按当前设备时区输入，未来时间会定时展示。</small
-            ></label
-          >
-          <label class="studio-field"
-            >正文行距<select id="document-line-height"
-              ><option value="1.7">紧凑 · 1.7</option><option value="2"
-                >舒适 · 2.0</option
-              ><option value="2.3">宽松 · 2.3</option></select
-            ></label
-          >
-          <div class="studio-field">
-            <span>文章封面</span><div class="cover-preview" id="cover-preview">
-              <span>从图片中选择一张封面</span>
-            </div><div class="cover-actions">
-              <button id="choose-cover" type="button">选择图片</button><button
-                id="remove-cover"
-                type="button">移除封面</button
-              >
-            </div>
-          </div>
-          <label class="studio-checkbox"
-            ><input id="document-featured" type="checkbox" /> 设为精选记录</label
-          >
-        </fieldset>
-        <div class="sync-panel">
-          <div>
-            <strong>GitHub 同步</strong><span id="connection-status"
-              >未连接</span
-            >
-          </div><label class="studio-checkbox"
-            ><input id="auto-sync" type="checkbox" /> 修改后自动同步</label
-          ><p>
-            开启后，停止输入 10
-            秒自动同步。新记录先作为草稿保存；发布后的修改会更新网站。
-          </p><button id="sync-draft-button" class="studio-button"
-            >同步为草稿</button
-          ><button id="reload-remote" class="studio-text-button" hidden
-            >从 GitHub 重新载入</button
-          ><p id="sync-result" role="status"></p><a
-            id="commit-link"
-            target="_blank"
-            rel="noopener noreferrer"
-            hidden>查看本次提交 ↗</a
-          ><a
-            href={`https://github.com/${studioConfig.repository}/actions`}
-            target="_blank"
-            rel="noopener noreferrer">查看网站部署进度 ↗</a
-          >
-        </div>
-        <div class="local-document-actions">
-          <button
-            id="delete-local-document"
-            type="button"
-            class="studio-text-button">删除本机记录</button
-          >
-        </div>
-      </aside>
     </div>
     <button
       id="drawer-backdrop"
@@ -395,6 +393,7 @@ import "@/styles/collections.css";
       accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
       hidden
     />
+    <StudioLibraryTools />
     <dialog id="connect-dialog" class="studio-dialog">
       <form id="connect-form">
         <button

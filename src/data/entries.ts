@@ -59,9 +59,7 @@ export function resourceUrl(value: unknown): string {
 
 /** Fit a PDF to its reading pane while preserving an explicit page or zoom. */
 export function pdfPreviewUrl(value: string): string {
-  return value.includes("#")
-    ? value
-    : `${value}#zoom=page-width&view=FitH&navpanes=0`;
+  return value.includes("#") ? value : `${value}#zoom=page-width&navpanes=0`;
 }
 
 const string = (value: unknown, length = 2000) =>

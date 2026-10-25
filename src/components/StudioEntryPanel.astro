@@ -63,21 +63,46 @@ import { entryStatuses } from "@/data/entries";
     <div id="gallery-editor" class="gallery-editor"></div>
   </div>
   <div id="paper-fields" hidden>
-    <div class="entry-search-row">
-      <input
-        id="paper-source"
-        type="url"
-        aria-label="论文网址"
-        placeholder="论文网址 / arXiv / PDF 链接"
-      />
-      <button id="paper-attach" type="button" class="studio-button"
-        >添加论文</button
+    <details
+      id="paper-attachment-details"
+      class="paper-attachment-details"
+      open
+    >
+      <summary>论文来源与附件</summary>
+      <div class="entry-search-row">
+        <input
+          id="paper-source"
+          type="url"
+          aria-label="论文网址"
+          placeholder="论文网址 / arXiv / PDF 链接"
+        />
+        <button id="paper-attach" type="button" class="studio-button"
+          >添加论文</button
+        >
+      </div>
+      <div class="paper-upload-row">
+        <button id="paper-upload" type="button" class="studio-button"
+          >上传 PDF</button
+        >
+        <input
+          id="paper-file"
+          type="file"
+          accept="application/pdf,.pdf"
+          hidden
+        />
+      </div>
+      <label class="entry-inline-field"
+        >PDF 链接（可选）<input
+          id="paper-pdf"
+          type="url"
+          placeholder="自动识别，也可手动填写 PDF 地址"
+        /></label
       >
-    </div>
+      <label class="entry-inline-field"
+        >作者（可选）<input id="paper-authors" placeholder="论文作者" /></label
+      >
+    </details>
     <div class="paper-upload-row">
-      <button id="paper-upload" type="button" class="studio-button"
-        >上传 PDF</button
-      >
       <button
         id="paper-read-toggle"
         type="button"
@@ -87,18 +112,7 @@ import { entryStatuses } from "@/data/entries";
       <button id="paper-remove" type="button" class="studio-text-button" hidden
         >移除论文</button
       >
-      <input id="paper-file" type="file" accept="application/pdf,.pdf" hidden />
     </div>
-    <label class="entry-inline-field"
-      >PDF 链接（可选）<input
-        id="paper-pdf"
-        type="url"
-        placeholder="自动识别，也可手动填写 PDF 地址"
-      /></label
-    >
-    <label class="entry-inline-field"
-      >作者（可选）<input id="paper-authors" placeholder="论文作者" /></label
-    >
     <p id="paper-status" class="entry-hint" role="status"></p>
   </div>
   <label class="entry-inline-field"

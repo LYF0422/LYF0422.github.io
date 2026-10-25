@@ -181,6 +181,9 @@ export class CollectionEditor {
     input("paper-source").value = this.entry.paper.sourceUrl;
     input("paper-pdf").value = this.entry.paper.pdfUrl;
     input("paper-authors").value = this.entry.paper.authors;
+    $<HTMLDetailsElement>("paper-attachment-details").open = !(
+      this.entry.paper.sourceUrl || this.entry.paper.pdfUrl
+    );
     this.renderSubject();
     this.renderPhotos();
     this.updatePaper();
@@ -437,6 +440,7 @@ export class CollectionEditor {
   private attachPaper() {
     Object.assign(this.entry.paper, paperFromUrl(input("paper-source").value));
     input("paper-pdf").value = this.entry.paper.pdfUrl;
+    $<HTMLDetailsElement>("paper-attachment-details").open = false;
     this.reading = true;
     this.updatePaper();
     this.context.changed();
@@ -460,6 +464,7 @@ export class CollectionEditor {
       if (!this.doc.title.trim())
         this.context.title(file.name.replace(/\.pdf$/i, ""));
       input("paper-pdf").value = path;
+      $<HTMLDetailsElement>("paper-attachment-details").open = false;
       this.reading = true;
       this.updatePaper();
       this.context.changed();

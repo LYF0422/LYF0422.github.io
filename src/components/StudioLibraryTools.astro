@@ -1,0 +1,70 @@
+---
+import { categories } from "@/data/categories";
+---
+
+<div
+  id="document-menu"
+  class="document-menu"
+  role="menu"
+  aria-label="文章操作"
+  hidden
+>
+  <p id="document-menu-title"></p>
+  <button type="button" role="menuitem" data-library-action="open"
+    >打开编辑</button
+  >
+  <button type="button" role="menuitem" data-library-action="metadata"
+    >修改分类和标签</button
+  >
+  <hr />
+  <button
+    type="button"
+    role="menuitem"
+    data-library-action="local"
+    class="menu-danger">删除本机记录</button
+  >
+  <button
+    type="button"
+    role="menuitem"
+    data-library-action="remote"
+    class="menu-danger">删除 GitHub 文章…</button
+  >
+</div>
+<dialog
+  id="organize-dialog"
+  class="studio-dialog organize-dialog"
+  aria-labelledby="organize-title"
+>
+  <form id="organize-form">
+    <h2 id="organize-title">整理文章</h2>
+    <p id="organize-document-title"></p>
+    <fieldset id="organize-fields">
+      <label class="studio-field"
+        >分类<select id="organize-category"
+          >{
+            categories.map(category => (
+              <option value={category.id}>
+                {category.title} · {category.subtitle}
+              </option>
+            ))
+          }</select
+        ></label
+      >
+      <label class="studio-field"
+        >标签<input id="organize-tags" placeholder="用逗号分隔标签" /></label
+      >
+    </fieldset>
+    <p id="organize-status" role="status"></p>
+    <p id="organize-error" role="alert" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" id="organize-cancel" class="studio-button"
+        >取消</button
+      >
+      <button
+        type="submit"
+        id="organize-save"
+        class="studio-button studio-primary">保存</button
+      >
+    </div>
+  </form>
+</dialog>

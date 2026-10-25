@@ -74,6 +74,22 @@ export function cleanHtml(html: string): string {
   });
 }
 
+export function updatePostOrganization(
+  source: string,
+  category: CategoryId,
+  tags: string[]
+): string {
+  if (!categoryIds.includes(category)) throw new Error("请选择有效分类。");
+  const match = source.match(
+    /^\uFEFF?---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/
+  );
+  if (!match) throw new Error("这篇文章缺少文章信息，请先打开编辑后保存。");
+  const meta = parse(match[1], { maxAliasCount: 20 });
+  if (!meta || typeof meta !== "object" || Array.isArray(meta))
+    throw new Error("文章信息格式无效，请先检查 Markdown 文件。");
+  return `---\n${stringify({ ...meta, category, tags, modDatetime: new Date() }).trimEnd()}\n---\n${source.slice(match[0].length)}`;
+}
+
 export function parseDocument(
   source: string,
   path: string | null = null,

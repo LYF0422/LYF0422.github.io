@@ -123,7 +123,10 @@ async function mockGitHub(page: Page) {
     }
     if (path === `${repository}/git/trees` && method === "POST") {
       const next = new Map(trees.get(data.base_tree));
-      for (const entry of data.tree) next.set(entry.path, entry.sha);
+      for (const entry of data.tree) {
+        if (entry.sha === null) next.delete(entry.path);
+        else next.set(entry.path, entry.sha);
+      }
       const sha = `tree-created-${++counter}`;
       trees.set(sha, next);
       return respond({ sha }, 201);
@@ -167,7 +170,7 @@ async function connect(page: Page) {
   await page.locator("#github-token").fill(token);
   await page.locator("#confirm-connect").click();
   await expect(page.locator("#connect-dialog")).not.toBeVisible();
-  await expect(page.locator("#remote-documents button")).toHaveCount(1);
+  await expect(page.locator("#remote-documents .document-open")).toHaveCount(1);
 }
 async function write(
   page: Page,
@@ -320,7 +323,7 @@ test("searches Bangumi anime, saves a personal rating, and restores the metadata
   });
   await page.reload();
   await page
-    .locator("#remote-documents button")
+    .locator("#remote-documents .document-open")
     .filter({ hasText: "测试动画" })
     .click();
   await expect(page.locator("#entry-rating")).toHaveValue("8.5");
@@ -428,9 +431,13 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
   await page.locator("#paper-attach").click();
   await expect(page.locator("#paper-reader-frame")).toHaveAttribute(
     "src",
-    "https://arxiv.org/pdf/1810.04703#zoom=page-width&view=FitH&navpanes=0"
+    "https://arxiv.org/pdf/1810.04703#zoom=page-width&navpanes=0"
   );
   await expect(page.locator(".with-paper-reader")).toBeVisible();
+  await expect(page.locator("#paper-attachment-details")).not.toHaveAttribute(
+    "open"
+  );
+  await page.locator("#paper-attachment-details > summary").click();
   await page.locator("#paper-authors").fill("Huang et al.");
   await page.locator("#entry-comment").fill("稀疏 IMU 的时序建模。");
   await page.locator("#paper-file").setInputFiles({
@@ -499,7 +506,7 @@ test("pastes and formats images, atomically publishes an Anime article, and rest
   const api = await mockGitHub(page);
   await connect(page);
   await write(page, "Anime studio test");
-  await page.locator("#document-category").selectOption("anime");
+  await page.locator("#quick-category").selectOption("anime");
   await page.locator(".tiptap").press("ControlOrMeta+A");
   await page.getByRole("button", { name: "加粗", exact: true }).click();
   await expect(page.locator(".tiptap strong")).toContainText("值得留下");
@@ -573,7 +580,7 @@ test("stops when another device changed the same article and retains the local v
 }) => {
   const api = await mockGitHub(page);
   await connect(page);
-  await page.locator("#remote-documents button").click();
+  await page.locator("#remote-documents .document-open").click();
   await expect(page.locator("#document-title")).toHaveValue("远端记录");
   await page.locator(".tiptap").fill("本机尚未合并的想法");
   api.mutateArticle();
@@ -621,7 +628,9 @@ test("retains the draft after a failed upload and successfully retries", async (
 test("automatically syncs new entries as drafts", async ({ page }) => {
   const api = await mockGitHub(page);
   await connect(page);
+  await page.locator("#publish-options > summary").click();
   await page.locator("#auto-sync").check();
+  await page.locator("#publish-options > summary").click();
   await write(page, "Automatic draft");
   await expect(page.locator("#sync-result")).toContainText("草稿已同步", {
     timeout: 20_000,
@@ -629,6 +638,167 @@ test("automatically syncs new entries as drafts", async ({ page }) => {
   expect(api.source("src/content/posts/automatic-draft.md")).toContain(
     "draft: true"
   );
+});
+
+test("organizes and deletes another local article from its context menu without changing the active editor", async ({
+  page,
+}) => {
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await write(page, "需要整理的记录", "第一篇的正文。");
+  await page.locator("#new-document").click();
+  await expect(page.locator("#document-title")).toHaveValue("");
+  await write(page, "正在写的记录", "不要切走这篇正文。");
+  const first = page
+    .locator("#local-documents .document-open")
+    .filter({ hasText: "需要整理的记录" });
+  await first.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "修改分类和标签" }).click();
+  await page.locator("#organize-category").selectOption("game");
+  await page.locator("#organize-tags").fill("RPG，游戏, RPG");
+  await page.locator("#organize-save").click();
+  await expect(page.locator("#organize-dialog")).not.toBeVisible();
+  await expect(page.locator("#document-title")).toHaveValue("正在写的记录");
+  await expect(page.locator(".tiptap")).toContainText("不要切走");
+  await first.click();
+  await expect(page.locator("#quick-category")).toHaveValue("game");
+  await expect(page.locator("#document-tags")).toHaveValue("RPG, 游戏");
+  await page.reload();
+  await expect(page.locator("#document-tags")).toHaveValue("RPG, 游戏");
+  await expect(page.locator("#connect-dialog")).not.toBeVisible();
+  await page
+    .locator("#local-documents .document-open")
+    .filter({ hasText: "正在写的记录" })
+    .click();
+  await expect(page.locator("#document-title")).toHaveValue("正在写的记录");
+  await first.click({ button: "right" });
+  page.once("dialog", dialog => dialog.accept());
+  await page
+    .getByRole("menuitem", { name: "删除本机记录", exact: true })
+    .click();
+  await expect(first).toHaveCount(0);
+  await expect(page.locator("#document-title")).toHaveValue("正在写的记录");
+  await page.reload();
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(1);
+  await expect(page.locator(".tiptap")).toContainText("不要切走");
+});
+
+test("updates only the selected GitHub article's category and tags and preserves its body", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await write(page, "当前编辑的正文", "这段文字不应该被替换。");
+  await page
+    .locator("#remote-documents .document-open")
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: "修改分类和标签" }).click();
+  await expect(page.locator("#organize-tags")).toHaveValue("anime");
+  await page.locator("#organize-category").selectOption("paper-reading");
+  await page.locator("#organize-tags").fill("IMU, 论文");
+  await page.locator("#organize-save").click();
+  await expect(page.locator("#organize-dialog")).not.toBeVisible();
+  const source = api.source(seedPath)!;
+  expect(entrySource(source)).toMatchObject({
+    category: "paper-reading",
+    tags: ["IMU", "论文"],
+    draft: true,
+  });
+  expect(source.slice(source.indexOf("\n---\n") + 5)).toBe(
+    seedSource.slice(seedSource.indexOf("\n---\n") + 5)
+  );
+  await expect(page.locator("#document-title")).toHaveValue("当前编辑的正文");
+  await expect(page.locator(".tiptap")).toContainText("不应该被替换");
+});
+
+test("deletes a GitHub article with a racing unrelated commit and retains its local draft", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await page.locator("#remote-documents .document-open").click();
+  await expect(page.locator("#document-title")).toHaveValue("远端记录");
+  await page.locator("#publish-options > summary").click();
+  await page.locator("#auto-sync").check();
+  await page.locator("#publish-options > summary").click();
+  await page.locator(".tiptap").fill("保留本机尚未同步的笔记。");
+  await page
+    .locator("#remote-documents .document-open")
+    .click({ button: "right" });
+  api.race = true;
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("menuitem", { name: "删除 GitHub 文章…" }).click();
+  await expect(page.locator("#remote-documents .document-open")).toHaveCount(0);
+  expect(api.files.has(seedPath)).toBe(false);
+  expect(api.files.get("README.md")).toBe("readme-other-device");
+  expect(api.calls.filter(call => call.method === "PATCH")).toHaveLength(2);
+  await expect(page.locator(".tiptap")).toContainText("保留本机尚未同步");
+  await expect(page.locator("#document-state")).toContainText("本机草稿");
+  await page.locator("#publish-options > summary").click();
+  await expect(page.locator("#auto-sync")).not.toBeChecked();
+  await page.reload();
+  await expect(page.locator(".tiptap")).toContainText("保留本机尚未同步");
+});
+
+test("refuses to delete or overwrite an article that changed on another device", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await page
+    .locator("#remote-documents .document-open")
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: "修改分类和标签" }).click();
+  await expect(page.locator("#organize-tags")).toHaveValue("anime");
+  await page.locator("#organize-tags").fill("保留的输入");
+  api.mutateArticle();
+  await page.locator("#organize-save").click();
+  await expect(page.locator("#organize-error")).toContainText("其他设备已更新");
+  await expect(page.locator("#organize-tags")).toHaveValue("保留的输入");
+  await page.locator("#organize-cancel").click();
+  await page
+    .locator("#remote-documents .document-open")
+    .click({ button: "right" });
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("menuitem", { name: "删除 GitHub 文章…" }).click();
+  await expect(page.locator("#studio-error")).toContainText("其他设备已更新");
+  expect(api.source(seedPath)).toContain("来自另一台设备的更新");
+  expect(api.calls.filter(call => call.method !== "GET")).toHaveLength(0);
+});
+
+test("offers touch and keyboard article menus and an inline template without a right sidebar", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("anime");
+  await expect(page.locator("#bangumi-query")).toBeVisible();
+  await expect(page.locator("#document-tags")).toBeVisible();
+  await expect(page.locator(".studio-inspector")).toHaveCount(0);
+  await write(page, "手机整理测试");
+  await page.locator("#toggle-library").click();
+  const more = page.getByRole("button", { name: "管理 手机整理测试" });
+  await more.click();
+  await expect(page.getByRole("menu", { name: "文章操作" })).toBeVisible();
+  const box = await page.locator("#document-menu").boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await page.keyboard.press("Escape");
+  await expect(more).toBeFocused();
+  await page.locator("#local-documents .document-open").press("Shift+F10");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#organize-dialog")).toBeVisible();
+  await page.locator("#organize-category").selectOption("photo");
+  await page.locator("#organize-save").click();
+  await expect(page.locator("#quick-category")).toHaveValue("photo");
+  await page.locator("#drawer-backdrop").click({ position: { x: 380, y: 30 } });
+  await expect(page.locator("#gallery-add")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true);
 });
 
 test("deletes only the selected local record, cancels safely, and does not restore a pending autosave", async ({
@@ -642,20 +812,30 @@ test("deletes only the selected local record, cancels safely, and does not resto
   await write(page, "不需要的草稿", "这篇记录准备删除。");
   await expect(page.locator("#local-documents")).toContainText("不需要的草稿");
   page.once("dialog", dialog => dialog.dismiss());
+  await page
+    .locator("#article-options")
+    .evaluate((details: HTMLDetailsElement) => {
+      details.open = true;
+    });
   await page.locator("#delete-local-document").click();
   await expect(page.locator("#document-title")).toHaveValue("不需要的草稿");
-  await expect(page.locator("#local-documents button")).toHaveCount(2);
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(2);
 
   await page.locator("#document-title").fill("尚在等待自动保存的草稿");
   page.once("dialog", async dialog => {
     expect(dialog.message()).toContain("GitHub 和网站上的文章会保留");
     await dialog.accept();
   });
+  await page
+    .locator("#article-options")
+    .evaluate((details: HTMLDetailsElement) => {
+      details.open = true;
+    });
   await page.locator("#delete-local-document").click();
   await expect(page.locator("#document-title")).toHaveValue("保留的草稿");
-  await expect(page.locator("#local-documents button")).toHaveCount(1);
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(1);
   await page.reload();
-  await expect(page.locator("#local-documents button")).toHaveCount(1);
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(1);
   await expect(page.locator("#document-title")).toHaveValue("保留的草稿");
   await expect(page.locator(".tiptap")).toContainText("这篇记录需要保留");
 });
@@ -665,15 +845,20 @@ test("removes a local backup without deleting its GitHub article", async ({
 }) => {
   const api = await mockGitHub(page);
   await connect(page);
-  await page.locator("#remote-documents button").click();
+  await page.locator("#remote-documents .document-open").click();
   await expect(page.locator("#document-title")).toHaveValue("远端记录");
   page.once("dialog", dialog => dialog.accept());
+  await page
+    .locator("#article-options")
+    .evaluate((details: HTMLDetailsElement) => {
+      details.open = true;
+    });
   await page.locator("#delete-local-document").click();
   await expect(page.locator("#local-documents")).not.toContainText("远端记录");
-  await expect(page.locator("#remote-documents button")).toHaveCount(1);
+  await expect(page.locator("#remote-documents .document-open")).toHaveCount(1);
   expect(api.source(seedPath)).toBe(seedSource);
   expect(api.calls.filter(call => call.method !== "GET")).toHaveLength(0);
-  await page.locator("#remote-documents button").click();
+  await page.locator("#remote-documents .document-open").click();
   await expect(page.locator("#document-title")).toHaveValue("远端记录");
   await expect(page.locator(".tiptap")).toContainText("原始正文");
 });
@@ -685,10 +870,10 @@ test("supports phone editing, settings, and a public Anime category", async ({
   await page.goto("/studio/");
   await page.locator("#try-writing").click();
   await write(page, "手机记录", "在手机上也可以写下想法。");
-  await page.locator("#toggle-inspector").click();
+  await page.locator("#article-options > summary").click();
   await expect(page.locator("#delete-local-document")).toBeVisible();
-  await page.locator("#document-category").selectOption("anime");
-  await page.locator("#close-inspector").click();
+  await page.locator("#quick-category").selectOption("anime");
+  await page.locator("#article-options > summary").click();
   await page.locator("#mode-preview").click();
   await expect(page.locator("#article-preview")).toContainText(
     "在手机上也可以"

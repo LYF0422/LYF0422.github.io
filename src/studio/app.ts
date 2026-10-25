@@ -27,6 +27,12 @@ import {
 import { GitHubClient, GitHubError, type RemoteFile } from "./github";
 import { CollectionEditor } from "./collections";
 import { normalizeEntry } from "@/data/entries";
+import {
+  LibraryTools,
+  parseTags,
+  type ArticleOrganization,
+  type LibraryTarget,
+} from "./library";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => {
   const element = document.getElementById(id);
@@ -38,6 +44,7 @@ const text = (id: string, value: string) => {
   $(id).textContent = value;
 };
 const sessionKey = "writing-studio-session";
+const selectionKey = `studio-active:${studioConfig.repository}`;
 let current = newDocument();
 let documents: WritingDocument[] = [];
 let remoteFiles: RemoteFile[] = [];
@@ -57,6 +64,7 @@ let deletingLocal = false;
 const assetUrls = new Map<string, string>();
 const assets = new Map<string, WritingAsset>();
 let collectionEditor: CollectionEditor;
+let libraryTools: LibraryTools;
 
 function toast(message: string) {
   text("studio-toast", message);
@@ -363,6 +371,14 @@ function updateDocumentLabels() {
     current.remoteSha && !current.draft ? "更新发布 ↗" : "发布 ↗"
   );
   $("reload-remote").hidden = !current.remoteSha;
+  $("template-heading").textContent =
+    current.category === "paper-reading"
+      ? "阅读笔记"
+      : current.category === "photo"
+        ? "相册正文"
+        : current.category === "notes"
+          ? "正文"
+          : "详细感想";
 }
 function titleHeight() {
   const title = $<HTMLTextAreaElement>("document-title");
@@ -409,6 +425,7 @@ function renderLibrary() {
   )) {
     const item = document.createElement("li");
     const button = document.createElement("button");
+    button.className = "document-open";
     const title = document.createElement("strong");
     title.textContent = doc.title || "未命名的记录";
     const meta = document.createElement("small");
@@ -419,6 +436,13 @@ function renderLibrary() {
       void openDocument(doc).catch(showError);
     });
     item.append(button);
+    libraryTools.bind(item, {
+      id: doc.id,
+      path: doc.path ?? undefined,
+      sha: doc.remoteSha ?? undefined,
+      title: doc.title || "未命名的记录",
+      remote: false,
+    });
     localList.append(item);
   }
   const remoteList = $("remote-documents");
@@ -430,6 +454,7 @@ function renderLibrary() {
     if (!`${titleText} ${file.path}`.toLowerCase().includes(filter)) continue;
     const item = document.createElement("li");
     const button = document.createElement("button");
+    button.className = "document-open";
     const title = document.createElement("strong");
     title.textContent = titleText;
     const meta = document.createElement("small");
@@ -445,6 +470,13 @@ function renderLibrary() {
       void openRemote(file).catch(showError);
     });
     item.append(button);
+    libraryTools.bind(item, {
+      id: cached?.id,
+      path: file.path,
+      sha: file.sha,
+      title: titleText,
+      remote: true,
+    });
     remoteList.append(item);
   }
 }
@@ -463,7 +495,7 @@ async function hydrateAssets(doc: WritingDocument) {
   );
 }
 function closeDrawers() {
-  document.body.classList.remove("library-open", "inspector-open");
+  document.body.classList.remove("library-open");
   $("drawer-backdrop").hidden = true;
 }
 function guardSwitch() {
@@ -489,7 +521,6 @@ async function openDocument(doc: WritingDocument, savePrevious = true) {
     input("document-tags").value = current.tags.join(", ");
     input("document-slug").value = current.slug;
     input("document-slug").disabled = Boolean(current.path);
-    $<HTMLSelectElement>("document-category").value = current.category;
     $<HTMLSelectElement>("quick-category").value = current.category;
     input("document-featured").checked = current.featured;
     const date = new Date(current.pubDatetime);
@@ -513,6 +544,7 @@ async function openDocument(doc: WritingDocument, savePrevious = true) {
     clearError();
     if (doc.remoteSha && !documents.some(item => item.id === doc.id))
       await saveLocal();
+    localStorage.setItem(selectionKey, current.id);
   } finally {
     loading = false;
   }
@@ -523,7 +555,7 @@ async function openRemote(file: RemoteFile, forceReload = false) {
   if (cached && !forceReload) {
     await openDocument(cached);
     if (cached.remoteSha !== file.sha)
-      toast("这篇文章在其他设备有更新。可在设置中重新载入 GitHub 版本。");
+      toast("这篇文章在其他设备有更新。可在发布选项中重新载入 GitHub 版本。");
     return;
   }
   text("save-status", "正在读取 GitHub 文章…");
@@ -630,6 +662,140 @@ async function synchronize(publishState?: boolean) {
   } catch (error) {
     text("sync-result", "同步未完成，本机草稿和图片已保留。");
     throw error;
+  } finally {
+    setBusy(false);
+  }
+}
+function reflectOrganization() {
+  input("document-tags").value = current.tags.join(", ");
+  $<HTMLSelectElement>("quick-category").value = current.category;
+  input("document-slug").disabled = Boolean(current.path);
+  collectionEditor.render();
+  collectionEditor.setPreview(preview);
+  updateDocumentLabels();
+  renderLibrary();
+}
+function recordCommit(url: string, message: string) {
+  const link = $<HTMLAnchorElement>("commit-link");
+  link.href = url;
+  link.hidden = false;
+  text("sync-result", message);
+}
+async function organizeListedDocument(
+  target: LibraryTarget,
+  values: ArticleOrganization
+) {
+  if (!guardSwitch()) throw new Error("请等待当前操作完成后重试。");
+  clearTimeout(syncTimer);
+  setBusy(true);
+  try {
+    await saveLocal();
+    let doc = documents.find(item =>
+      target.remote ? item.path === target.path : item.id === target.id
+    );
+    if (target.remote) {
+      if (!client || !target.path || !target.sha)
+        throw new Error("请先连接 GitHub。");
+      const result = await client.organizePost(
+        { path: target.path, sha: target.sha },
+        values.category,
+        values.tags
+      );
+      if (!result.sha) throw new Error("GitHub 未返回文章版本，请刷新后重试。");
+      remoteFiles = remoteFiles.map(file =>
+        file.path === target.path ? { ...file, sha: result.sha! } : file
+      );
+      if (doc) doc = { ...doc, remoteSha: result.sha };
+      recordCommit(result.url, "分类与标签已同步，等待网站自动部署。");
+    }
+    if (doc) {
+      doc = { ...doc, ...values, updatedAt: new Date().toISOString() };
+      if (current.id === doc.id) Object.assign(current, doc);
+      await saveDocument(doc);
+      documents = documents.map(item => (item.id === doc!.id ? doc! : item));
+    }
+    reflectOrganization();
+    toast(
+      target.remote ? "分类与标签已同步到 GitHub。" : "分类与标签已保存在本机。"
+    );
+  } finally {
+    setBusy(false);
+  }
+  if (!target.remote && current.id === target.id) changed();
+}
+async function deleteLocalDocument(id: string) {
+  if (!guardSwitch()) return;
+  const doc =
+    id === current.id ? snapshot() : documents.find(item => item.id === id);
+  if (!doc) return;
+  const title = doc.title.trim() || "未命名的记录";
+  if (
+    !window.confirm(
+      `删除「${title}」的本机记录？未同步的修改将丢失，GitHub 和网站上的文章会保留。`
+    )
+  )
+    return;
+  const active = current.id === id;
+  if (active) {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    clearTimeout(syncTimer);
+  } else await saveLocal();
+  deletingLocal = true;
+  setBusy(true);
+  try {
+    await lastSave.catch(() => {});
+    await removeDocument(id);
+    documents = documents.filter(item => item.id !== id);
+  } finally {
+    deletingLocal = false;
+    setBusy(false);
+  }
+  if (active)
+    await openDocument(documents[0] ?? newDocument(current.category), false);
+  else renderLibrary();
+  toast("本机记录已删除，GitHub 和网站上的文章不受影响。");
+}
+async function deleteRemoteDocument(target: LibraryTarget) {
+  if (!guardSwitch()) return;
+  if (!client || !target.path || !target.sha) {
+    $<HTMLDialogElement>("connect-dialog").showModal();
+    return;
+  }
+  if (
+    !window.confirm(
+      `从 GitHub 和网站删除「${target.title}」？本机备份会保留；附件和历史提交不会删除。`
+    )
+  )
+    return;
+  clearTimeout(syncTimer);
+  setBusy(true);
+  try {
+    await saveLocal();
+    const result = await client.deletePost({
+      path: target.path,
+      sha: target.sha,
+    });
+    // Stop automatic publishing so a retained draft cannot recreate the deleted post.
+    autoSync = false;
+    input("auto-sync").checked = false;
+    localStorage.setItem("studio-auto-sync", "false");
+    remoteFiles = remoteFiles.filter(file => file.path !== target.path);
+    for (const doc of documents.filter(item => item.path === target.path)) {
+      const draft = {
+        ...doc,
+        path: null,
+        remoteSha: null,
+        syncedAt: null,
+        draft: true,
+      };
+      if (current.id === doc.id) Object.assign(current, draft);
+      await saveDocument(draft);
+      documents = documents.map(item => (item.id === doc.id ? draft : item));
+    }
+    reflectOrganization();
+    recordCommit(result.url, "文章已从 GitHub 删除，网站将在部署后移除。");
+    toast("已删除 GitHub 文章，本机草稿保留；自动同步已关闭。");
   } finally {
     setBusy(false);
   }
@@ -743,6 +909,35 @@ collectionEditor = new CollectionEditor({
   cover: renderCover,
   error: showError,
   busy: () => busy,
+});
+
+libraryTools = new LibraryTools({
+  available: () => !loading && guardSwitch(),
+  open: async target => {
+    if (target.remote && target.path && target.sha)
+      await openRemote({ path: target.path, sha: target.sha });
+    else {
+      const doc = documents.find(item => item.id === target.id);
+      if (doc) await openDocument(doc);
+    }
+  },
+  read: async target => {
+    await saveLocal();
+    if (target.remote) {
+      if (!client || !target.path || !target.sha)
+        throw new Error("请先连接 GitHub。");
+      return parseDocument(
+        await client.readFile({ path: target.path, sha: target.sha })
+      );
+    }
+    const doc = documents.find(item => item.id === target.id);
+    if (!doc) throw new Error("这篇本机记录已不存在，请刷新文章库。");
+    return structuredClone(doc);
+  },
+  save: organizeListedDocument,
+  removeLocal: deleteLocalDocument,
+  removeRemote: deleteRemoteDocument,
+  error: showError,
 });
 
 $("writing-toolbar").addEventListener("mousedown", event => {
@@ -910,14 +1105,7 @@ listen("document-description", "input", () => {
   changed();
 });
 listen("document-tags", "input", () => {
-  current.tags = Array.from(
-    new Set(
-      input("document-tags")
-        .value.split(/[,，]/)
-        .map(tag => tag.trim())
-        .filter(Boolean)
-    )
-  );
+  current.tags = parseTags(input("document-tags").value);
   changed();
 });
 listen("document-slug", "input", () => {
@@ -927,14 +1115,10 @@ listen("document-slug", "input", () => {
 });
 function changeCategory(id: string) {
   current.category = $<HTMLSelectElement>(id).value as CategoryId;
-  $<HTMLSelectElement>("document-category").value = current.category;
   $<HTMLSelectElement>("quick-category").value = current.category;
   collectionEditor.render();
   changed();
 }
-listen("document-category", "change", () =>
-  changeCategory("document-category")
-);
 listen("quick-category", "change", () => changeCategory("quick-category"));
 listen("document-featured", "change", () => {
   current.featured = input("document-featured").checked;
@@ -965,32 +1149,7 @@ listen("document-filter", "input", renderLibrary);
 listen("refresh-library", "click", refreshLibrary);
 listen("publish-button", "click", () => synchronize(true));
 listen("sync-draft-button", "click", () => synchronize(false));
-listen("delete-local-document", "click", async () => {
-  if (!guardSwitch()) return;
-  const title = current.title.trim() || "未命名的记录";
-  if (
-    !window.confirm(
-      `删除「${title}」的本机记录？未同步的修改将丢失，GitHub 和网站上的文章会保留。`
-    )
-  )
-    return;
-  clearTimeout(saveTimer);
-  saveTimer = undefined;
-  clearTimeout(syncTimer);
-  deletingLocal = true;
-  setBusy(true);
-  try {
-    // Finish queued writes first so an earlier autosave cannot restore the record.
-    await lastSave.catch(() => {});
-    await removeDocument(current.id);
-    documents = documents.filter(doc => doc.id !== current.id);
-  } finally {
-    deletingLocal = false;
-    setBusy(false);
-  }
-  await openDocument(documents[0] ?? newDocument(current.category), false);
-  toast("本机记录已删除，GitHub 和网站上的文章不受影响。");
-});
+listen("delete-local-document", "click", () => deleteLocalDocument(current.id));
 listen("auto-sync", "change", () => {
   autoSync = input("auto-sync").checked;
   localStorage.setItem("studio-auto-sync", String(autoSync));
@@ -1029,7 +1188,10 @@ function setMode(isPreview: boolean) {
   $("table-tools").hidden = true;
   $("mode-write").setAttribute("aria-pressed", String(!isPreview));
   $("mode-preview").setAttribute("aria-pressed", String(isPreview));
+  document.body.classList.toggle("is-preview", isPreview);
   $<HTMLTextAreaElement>("document-title").readOnly = isPreview;
+  $<HTMLTextAreaElement>("document-description").readOnly = isPreview;
+  input("document-tags").readOnly = isPreview;
   editor.setEditable(!isPreview && !busy);
   $<HTMLSelectElement>("quick-category").disabled = isPreview || busy;
   collectionEditor.setPreview(isPreview);
@@ -1040,17 +1202,20 @@ listen("mode-write", "click", () => setMode(false));
 listen("mode-preview", "click", () => setMode(true));
 listen("toggle-library", "click", () => {
   const opened = document.body.classList.toggle("library-open");
-  document.body.classList.remove("inspector-open");
   $("drawer-backdrop").hidden = !opened;
 });
-listen("toggle-inspector", "click", () => {
-  const opened = document.body.classList.toggle("inspector-open");
-  document.body.classList.remove("library-open");
-  $("drawer-backdrop").hidden = !opened;
+listen("focus-writing", "click", () => {
+  const focused = document.body.classList.toggle("focus-writing");
+  $("focus-writing").setAttribute("aria-pressed", String(focused));
+  text("focus-writing", focused ? "显示文章库" : "专注");
 });
-listen("close-inspector", "click", closeDrawers);
+document.addEventListener("pointerdown", event => {
+  const options = $<HTMLDetailsElement>("publish-options");
+  if (!options.contains(event.target as Node)) options.open = false;
+});
 listen("drawer-backdrop", "click", closeDrawers);
 document.addEventListener("keydown", event => {
+  if (event.defaultPrevented) return;
   if (event.key === "Escape") closeDrawers();
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
@@ -1160,7 +1325,11 @@ window.addEventListener("pagehide", () => {
 async function initialize() {
   input("auto-sync").checked = autoSync;
   documents = await loadDocuments();
-  await openDocument(documents[0] ?? current, false);
+  const returningWriter = documents.length > 0;
+  const selected = documents.find(
+    doc => doc.id === localStorage.getItem(selectionKey)
+  );
+  await openDocument(selected ?? documents[0] ?? current, false);
   if (!documents.length) await saveLocal();
   const token = sessionStorage.getItem(sessionKey);
   if (token) {
@@ -1171,6 +1340,7 @@ async function initialize() {
       showError(error);
       $<HTMLDialogElement>("connect-dialog").showModal();
     }
-  } else $<HTMLDialogElement>("connect-dialog").showModal();
+  } else if (!returningWriter)
+    $<HTMLDialogElement>("connect-dialog").showModal();
 }
 void initialize().catch(showError);

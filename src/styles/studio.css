@@ -126,7 +126,7 @@
 .studio-shell {
   min-height: calc(100dvh - 79px);
   display: grid;
-  grid-template-columns: 225px minmax(0, 1fr) 267px;
+  grid-template-columns: 225px minmax(0, 1fr);
 }
 .studio-library {
   border-right: 1px solid var(--border);
@@ -279,9 +279,6 @@
   background: var(--background);
   color: var(--foreground);
   box-shadow: 0 1px 3px #00000008;
-}
-#toggle-inspector {
-  display: none;
 }
 .writing-toolbar {
   display: flex;
@@ -605,37 +602,6 @@
 .status-separator {
   margin-inline: 9px;
 }
-.studio-inspector {
-  border-left: 1px solid var(--border);
-  padding: 27px 22px;
-  min-width: 0;
-  background: var(--background);
-}
-.inspector-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.inspector-heading .eyebrow {
-  font-size: 9px;
-}
-#close-inspector {
-  display: none;
-}
-.studio-inspector h2 {
-  font-family: var(--serif);
-  font-size: 21px;
-  font-weight: 400;
-  margin: 13px 0 28px;
-}
-.local-document-actions {
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
-}
-.local-document-actions button {
-  color: #b45d54;
-}
 .studio-field {
   display: flex;
   flex-direction: column;
@@ -731,10 +697,7 @@
   color: var(--accent);
   margin-top: 12px;
 }
-#sync-draft-button {
-  width: 100%;
-  margin-top: 2px;
-}
+
 #reload-remote {
   display: block;
   margin-top: 8px;
@@ -896,31 +859,6 @@
   .studio-shell {
     grid-template-columns: 205px minmax(0, 1fr);
   }
-  .studio-inspector {
-    display: none;
-    position: fixed;
-    top: 79px;
-    bottom: 0;
-    right: 0;
-    width: 300px;
-    overflow-y: auto;
-    z-index: 35;
-  }
-  .studio-body.inspector-open .studio-inspector {
-    display: block;
-  }
-  #toggle-inspector {
-    display: inline-flex;
-    min-height: 30px;
-    padding: 4px 10px;
-    font-size: 10px;
-  }
-  #close-inspector {
-    display: inline-flex;
-  }
-  .studio-body.inspector-open .drawer-backdrop {
-    display: block;
-  }
   .drawer-backdrop {
     position: fixed;
     inset: 79px 0 0;
@@ -1007,10 +945,6 @@
   }
   .studio-body.library-open .drawer-backdrop {
     display: block;
-  }
-  .studio-inspector {
-    top: 67px;
-    width: min(320px, calc(100vw - 28px));
   }
   .drawer-backdrop {
     top: 67px;

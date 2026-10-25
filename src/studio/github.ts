@@ -3,9 +3,11 @@ import {
   documentPath,
   referencedMedia,
   serializeDocument,
+  updatePostOrganization,
   type WritingAsset,
   type WritingDocument,
 } from "./model";
+import type { CategoryId } from "@/data/categories";
 
 export interface RemoteFile {
   path: string;
@@ -140,6 +142,98 @@ export class GitHubClient {
   }
   rawUrl(path: string) {
     return `https://raw.githubusercontent.com/${encodePath(studioConfig.repository)}/${encodePath(studioConfig.branch)}/${encodePath(path.startsWith("/") ? `public${path}` : path)}`;
+  }
+  async organizePost(file: RemoteFile, category: CategoryId, tags: string[]) {
+    const source = updatePostOrganization(
+      await this.readFile(file),
+      category,
+      tags
+    );
+    return this.changePost(
+      file,
+      source,
+      `docs(studio): organize ${file.path.split("/").pop()}`
+    );
+  }
+  async deletePost(file: RemoteFile) {
+    return this.changePost(
+      file,
+      null,
+      `docs(studio): delete ${file.path.split("/").pop()}`
+    );
+  }
+  private async changePost(
+    file: RemoteFile,
+    source: string | null,
+    message: string
+  ) {
+    if (
+      !file.path.startsWith(`${studioConfig.postsDirectory}/`) ||
+      !file.path.endsWith(".md") ||
+      file.path.split("/").includes("..")
+    )
+      throw new Error("文章路径无效。");
+    let snapshot = await this.snapshot();
+    const assertUnchanged = () => {
+      if (
+        snapshot.files.find(item => item.path === file.path)?.sha !== file.sha
+      )
+        throw new GitHubError(
+          "其他设备已更新或删除这篇文章，请刷新文章库后重试。",
+          409
+        );
+    };
+    assertUnchanged();
+    const sha =
+      source === null
+        ? null
+        : (
+            await this.request<{ sha: string }>(
+              `${this.base}/git/blobs`,
+              "POST",
+              { content: source, encoding: "utf-8" }
+            )
+          ).sha;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const tree = await this.request<{ sha: string }>(
+        `${this.base}/git/trees`,
+        "POST",
+        {
+          base_tree: snapshot.tree,
+          tree: [{ path: file.path, mode: "100644", type: "blob", sha }],
+        }
+      );
+      const commit = await this.request<{ sha: string }>(
+        `${this.base}/git/commits`,
+        "POST",
+        {
+          message,
+          tree: tree.sha,
+          parents: [snapshot.head],
+        }
+      );
+      try {
+        await this.request(
+          `${this.base}/git/refs/heads/${encodePath(studioConfig.branch)}`,
+          "PATCH",
+          { sha: commit.sha, force: false }
+        );
+        return {
+          sha,
+          url: `https://github.com/${studioConfig.repository}/commit/${commit.sha}`,
+        };
+      } catch (error) {
+        if (
+          !(error instanceof GitHubError) ||
+          ![409, 422].includes(error.status) ||
+          attempt > 0
+        )
+          throw error;
+        snapshot = await this.snapshot();
+        assertUnchanged();
+      }
+    }
+    throw new Error("修改未完成，请刷新后重试。");
   }
   async publish(
     doc: WritingDocument,
