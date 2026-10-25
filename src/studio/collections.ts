@@ -6,6 +6,8 @@ import {
   resourceUrl,
 } from "@/data/entries";
 import { studioConfig } from "@/data/studio";
+import { getAssetPath } from "@/utils/withBase";
+import { loadCatalog } from "./catalog";
 import {
   downloadSubjectCover,
   getSubject,
@@ -155,6 +157,11 @@ export class CollectionEditor {
   private get entry() {
     return this.doc.entry;
   }
+  private async catalogInfo(signal?: AbortSignal) {
+    const catalog = await loadCatalog(signal);
+    $("catalog-info").textContent =
+      `站内热门作品库 · ${catalog.counts.anime} 部动画 / ${catalog.counts.game} 部游戏 · ${new Date(catalog.updatedAt).toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" })} 更新 · 来源 Bangumi`;
+  }
   render() {
     this.request?.abort();
     this.doc.entry = normalizeEntry(this.doc.entry);
@@ -183,6 +190,11 @@ export class CollectionEditor {
     input("bangumi-query").value = "";
     $("bangumi-results").replaceChildren();
     $("bangumi-status").textContent = "";
+    if (["anime", "game"].includes(category)) {
+      void this.catalogInfo().catch(() => {
+        $("catalog-info").textContent = "作品库暂时无法加载，可点击搜索重试。";
+      });
+    }
     input("paper-source").value = this.entry.paper.sourceUrl;
     input("paper-pdf").value = this.entry.paper.pdfUrl;
     input("paper-authors").value = this.entry.paper.authors;
@@ -207,6 +219,7 @@ export class CollectionEditor {
     $("bangumi-results").replaceChildren();
     $("bangumi-status").textContent = "正在检索…";
     try {
+      await this.catalogInfo(request.signal);
       const directId = subjectId(keyword);
       if (directId) {
         await this.select(directId, type, request, id, category);
@@ -221,16 +234,14 @@ export class CollectionEditor {
         return;
       $("bangumi-status").textContent = results.length
         ? "选择对应作品"
-        : "没有找到，试试原名或直接粘贴 Bangumi 条目链接。";
+        : "站内暂无匹配作品。仅收录部分热门作品，可尝试原名、别名或编号。";
       for (const result of results) {
         const button = node("button", "", "bangumi-result");
         button.type = "button";
-        const cover = resourceUrl(
-          result.images?.common || result.images?.large
-        );
+        const cover = resourceUrl(result.images.common);
         if (cover) {
           const img = node("img");
-          img.src = cover;
+          img.src = getAssetPath(cover);
           img.alt = "";
           img.referrerPolicy = "no-referrer";
           button.append(img);

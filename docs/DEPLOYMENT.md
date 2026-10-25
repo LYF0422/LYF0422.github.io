@@ -10,25 +10,41 @@
 
 写作台的配置位于 `src/data/studio.ts`，目标仓库为 `LYF0422/LYF0422.github.io`。首次使用与发布步骤见 [写作台指南](STUDIO.md)。
 
-## Cloudflare Workers 托管（当前配置）
+## 站内热门作品库
+
+Anime / Game 检索使用 `public/bangumi/` 下的静态资料和封面，与网站一起部署。浏览器仅请求当前博客域名，不再依赖 `workers.dev` 或 Bangumi API；无需购买域名。博客本身仍需在用户网络中可访问。
+
+- `catalog.json`：动画、游戏各 600 部，按 Bangumi 收藏人数选取，包含名称、别名、收录数量和更新时间。
+- `subjects/<id>.json`：作品的基础资料。
+- `covers/<id>.webp`：压缩封面，最大 360 × 480 像素。首批 400 部作品和封面合计约 12.4 MiB；浏览器按需加载详情和封面。
+
+`.github/workflows/sync-bangumi.yml` 在 GitHub 上运行下载，每周一北京时间 06:17 执行（UTC cron：`17 22 * * 0`，实际启动可能延迟）。手动更新：仓库 **Actions → Sync popular Bangumi catalog → Run workflow**。也可运行：
+
+```sh
+gh workflow run sync-bangumi.yml --repo LYF0422/LYF0422.github.io --ref main
+```
+
+同步脚本 `scripts/sync-bangumi.mjs` 下载公开条目，限制请求频率，压缩封面并验证完整性。同步失败保留上一版；单张封面下载失败优先复用旧封面。只有数量完整、至少 90% 封面可用时才更新，提交到 `main` 后显式触发 Pages 部署。同步工作流需要 `contents: write` 和 `actions: write` 权限，使用内置 `GITHUB_TOKEN`，无需额外密钥。
+
+已关联作品会连同封面保存到文章，不会随每周热门库的变化自动改写。仅支持库内检索，未收录条目会提示；这不是 Bangumi 全量数据库。覆盖范围可通过脚本中的 `perType` 调整，每类最多 1,000 部。
+
+## Cloudflare Workers 托管
 
 构建日志中的 `npx wrangler deploy` 对应 Workers Builds。`wrangler.jsonc` 将 `dist` 作为静态资源发布，`workers/site.ts` 仅处理 `/api/bangumi/*` 的公开作品检索、详情和封面请求，不需要 Astro SSR 适配器。文章、分类、写作台仍按各自的 HTML 路径访问，不存在的路径返回网站的 404 页面。
 
-写作台优先通过 `src/data/studio.ts` 的 `bangumiProxy` 请求自己的 Cloudflare 服务，失败时再尝试 Bangumi 官方接口。当前地址是 `https://lyf0422-github-io.yifan-liu-51f.workers.dev/api/bangumi`，GitHub Pages 也使用此地址。中转不需要 Bangumi 令牌或付费存储，仅接受固定的公开读取接口，不转发 GitHub 令牌或浏览器 Cookie；搜索、详情和封面分别缓存 5 分钟、6 小时和 7 天。
-
-如果用户网络无法访问 `workers.dev`，中转也会不可达。可将同一个 Worker 绑定到可访问的自定义域名，再更新 `bangumiProxy` 并重新部署；写作台的连接策略会随配置更新。此方案无法保证所有中国大陆运营商均可访问。
+原有 `/api/bangumi/*` 公开只读中转保留，但写作台已改用上面的站内热门作品库。如果用户网络无法访问 `workers.dev`，可继续使用 GitHub Pages 上的写作台和作品库。
 
 在 Cloudflare 的 **Workers & Pages → 对应 Worker → Settings → Build** 中核对：
 
-| 项目 | 值 |
-| --- | --- |
-| GitHub 仓库 | `LYF0422/LYF0422.github.io` |
-| 生产分支 | `main` |
-| 根目录 | `/`（仓库根目录） |
-| 构建命令 | `pnpm run build` |
-| 部署命令 | `npx wrangler deploy` |
-| 构建变量 `PNPM_VERSION` | `12.14.0` |
-| 构建变量 `NODE_VERSION` | `24.22.1` |
+| 项目                    | 值                          |
+| ----------------------- | --------------------------- |
+| GitHub 仓库             | `LYF0422/LYF0422.github.io` |
+| 生产分支                | `main`                      |
+| 根目录                  | `/`（仓库根目录）           |
+| 构建命令                | `pnpm run build`            |
+| 部署命令                | `npx wrangler deploy`       |
+| 构建变量 `PNPM_VERSION` | `12.14.0`                   |
+| 构建变量 `NODE_VERSION` | `24.22.1`                   |
 
 仓库的 `package.json` 也固定了 pnpm 版本，`.node-version` 固定了 Node.js 版本。构建变量应与它们保持一致；它们是构建环境变量，应添加到 **Build Variables and Secrets**，而不是 Worker 运行时变量。
 

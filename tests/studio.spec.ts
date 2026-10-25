@@ -215,85 +215,87 @@ function entrySource(source: string) {
   return parseYaml(source.match(/^---\n([\s\S]*?)\n---/)![1]);
 }
 
-async function mockBangumi(
-  page: Page,
-  options: { proxyFails?: boolean; coverFails?: boolean } = {}
-) {
+async function mockCatalog(page: Page, options: { coverFails?: boolean } = {}) {
   const requests: string[] = [];
   const cover = await sharp({
     create: { width: 32, height: 48, channels: 3, background: "#77a572" },
   })
-    .png()
+    .webp()
     .toBuffer();
-  const image = (route: Route) =>
-    options.coverFails
-      ? route.fulfill({ status: 502, body: "Cover unavailable" })
-      : route.fulfill({
-          status: 200,
-          contentType: "image/png",
-          headers: { "access-control-allow-origin": "*" },
-          body: cover,
-        });
-  const respond = async (route: Route) => {
+  const subjects = [2, 4].map(type => ({
+    id: type === 4 ? 200 : 100,
+    type,
+    name: type === 4 ? "Test Game" : "Test Anime",
+    name_cn: type === 4 ? "测试游戏" : "测试动画",
+    aliases: [type === 4 ? "游戏别名" : "动画别名"],
+    image: `/bangumi/covers/${type === 4 ? 200 : 100}.webp`,
+  }));
+  await page.route("http://127.0.0.1:4322/bangumi/**", async route => {
     const url = new URL(route.request().url());
     requests.push(url.href);
     expect(route.request().headers().authorization).toBeUndefined();
-    expect(route.request().headers().cookie).toBeUndefined();
-    const proxied = url.href.startsWith(bangumiProxy);
-    if (proxied && options.proxyFails) return route.abort();
-    const pathname = url.pathname.replace(/^\/api\/bangumi/, "");
-    if (pathname.startsWith("/covers/")) return image(route);
-    const type = pathname.startsWith("/search/")
-      ? Number(url.searchParams.get("type"))
-      : pathname.endsWith("/200")
-        ? 4
-        : 2;
-    const subject = {
-      id: type === 4 ? 200 : 100,
-      type,
-      name: type === 4 ? "Test Game" : "Test Anime",
-      name_cn: type === 4 ? "测试游戏" : "测试动画",
-      date: "2026-01-01",
-      platform: type === 4 ? "PC" : "TV",
-      eps: 12,
-      images: { common: "https://lain.bgm.tv/test-cover.jpg" },
-      summary: "来自 Bangumi 的作品简介。",
-      rating: { score: 6.2 },
-      infobox: [{ key: type === 4 ? "开发" : "导演", value: "测试作者" }],
-    };
+    if (url.pathname.includes("/covers/"))
+      return options.coverFails
+        ? route.fulfill({ status: 502, body: "Cover unavailable" })
+        : route.fulfill({
+            status: 200,
+            contentType: "image/webp",
+            body: cover,
+          });
+    const subject = subjects.find(item =>
+      url.pathname.endsWith(`/${item.id}.json`)
+    );
+    const data = url.pathname.endsWith("catalog.json")
+      ? { version: 1, updatedAt: "2026-10-25T00:00:00Z", subjects }
+      : subject
+        ? {
+            ...subject,
+            name: subject.name_cn,
+            originalName: subject.name,
+            date: "2026-01-01",
+            platform: subject.type === 4 ? "PC" : "TV",
+            episodes: 12,
+            summary: "来自 Bangumi 的作品简介。",
+            facts: [
+              {
+                label: subject.type === 4 ? "开发" : "导演",
+                value: "测试作者",
+              },
+            ],
+          }
+        : null;
     await route.fulfill({
-      status: 200,
+      status: data ? 200 : 404,
       contentType: "application/json",
-      headers: { "access-control-allow-origin": "*" },
-      body: JSON.stringify(
-        pathname.startsWith("/search/") ? { list: [subject] } : subject
-      ),
+      body: JSON.stringify(data),
     });
+  });
+  const blocked = (route: Route) => {
+    requests.push(`external:${route.request().url()}`);
+    return route.abort();
   };
-  await page.route("https://api.bgm.tv/**", respond);
-  await page.route(`${bangumiProxy}/**`, respond);
-  await page.route("https://lain.bgm.tv/**", image);
+  await page.route("https://api.bgm.tv/**", blocked);
+  await page.route(`${bangumiProxy}/**`, blocked);
+  await page.route("https://lain.bgm.tv/**", blocked);
   return requests;
 }
 
-test("uses the direct API if the relay is unavailable and uploads the subject image even with a custom cover", async ({
+test("uses only site catalog assets and uploads the subject image even with a custom cover", async ({
   page,
 }) => {
   const api = await mockGitHub(page);
-  const requests = await mockBangumi(page, { proxyFails: true });
+  const requests = await mockCatalog(page);
   await connect(page);
   const cover = await sharp({
     create: { width: 40, height: 40, channels: 3, background: "#abcabc" },
   })
     .png()
     .toBuffer();
-  await page
-    .locator("#cover-file")
-    .setInputFiles({
-      name: "my-cover.png",
-      mimeType: "image/png",
-      buffer: cover,
-    });
+  await page.locator("#cover-file").setInputFiles({
+    name: "my-cover.png",
+    mimeType: "image/png",
+    buffer: cover,
+  });
   await expect(page.locator("#save-status")).toHaveText("已自动保存在本机");
   await page.locator("#quick-category").selectOption("anime");
   await page.locator("#bangumi-query").fill("100");
@@ -305,15 +307,15 @@ test("uses the direct API if the relay is unavailable and uploads the subject im
   expect(metadata.entry.subject.image).toMatch(/^\/images\/studio\//);
   expect(metadata.cover).not.toBe(metadata.entry.subject.image);
   expect(api.media()).toHaveLength(2);
-  expect(requests.some(url => url.startsWith("https://api.bgm.tv/"))).toBe(
-    true
-  );
+  expect(
+    requests.every(url => url.startsWith("http://127.0.0.1:4322/bangumi/"))
+  ).toBe(true);
 });
 
 test("keeps the selected subject and review when its cover cannot be downloaded", async ({
   page,
 }) => {
-  await mockBangumi(page, { coverFails: true });
+  await mockCatalog(page, { coverFails: true });
   await page.goto("/studio/");
   await page.locator("#try-writing").click();
   await page.locator("#quick-category").selectOption("anime");
@@ -331,6 +333,74 @@ test("keeps the selected subject and review when its cover cannot be downloaded"
   await expect(page.locator("#entry-comment")).toHaveValue(
     "先记录感受，图片稍后补上。"
   );
+});
+
+test("searches aliases and normalized names locally and reports missing works without external fallback", async ({
+  page,
+}) => {
+  const requests = await mockCatalog(page);
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("anime");
+  await expect(page.locator("#catalog-info")).toContainText(
+    "1 部动画 / 1 部游戏"
+  );
+  for (const keyword of ["动画别名", "ＴＥＳＴ－ＡＮＩＭＥ"]) {
+    await page.locator("#bangumi-query").fill(keyword);
+    await page.locator("#bangumi-search").click();
+    await expect(page.locator(".bangumi-result")).toHaveCount(1);
+    await expect(page.locator(".bangumi-result")).toContainText("测试动画");
+  }
+  await page.locator("#bangumi-query").fill("测试游戏");
+  await page.locator("#bangumi-search").click();
+  await expect(page.locator("#bangumi-status")).toContainText(
+    "站内暂无匹配作品"
+  );
+  await expect(page.locator(".bangumi-result")).toHaveCount(0);
+  await page.locator("#bangumi-query").fill("https://bgm.tv/subject/999999");
+  await page.locator("#bangumi-search").click();
+  await expect(page.locator("#studio-error")).toContainText("站内暂未收录");
+  expect(
+    requests.some(url => url.includes("999999") || url.startsWith("external:"))
+  ).toBe(false);
+});
+
+test("retries loading a failed catalog and ignores a detail response after switching category", async ({
+  page,
+}) => {
+  await mockCatalog(page);
+  await page.route("**/bangumi/catalog.json", route =>
+    route.fulfill({ status: 503, body: "Unavailable" })
+  );
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("anime");
+  await expect(page.locator("#catalog-info")).toContainText("暂时无法加载");
+  await page.unroute("**/bangumi/catalog.json");
+  await page.locator("#bangumi-query").fill("测试动画");
+  await page.locator("#bangumi-search").click();
+  await expect(page.locator(".bangumi-result")).toHaveCount(1);
+  await expect(page.locator("#catalog-info")).toContainText(
+    "1 部动画 / 1 部游戏"
+  );
+  let respond!: () => void;
+  const gate = new Promise<void>(resolve => {
+    respond = resolve;
+  });
+  await page.route("**/bangumi/subjects/100.json", async route => {
+    await gate;
+    await route.fallback();
+  });
+  const detailRequest = page.waitForRequest("**/bangumi/subjects/100.json");
+  await page.locator(".bangumi-result").click();
+  await detailRequest;
+  await page.locator("#quick-category").selectOption("photo");
+  const detailResponse = page.waitForResponse("**/bangumi/subjects/100.json");
+  respond();
+  await (await detailResponse).finished();
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await expect(page.locator("#gallery-fields")).toBeVisible();
+  await expect(page.locator("#document-title")).toHaveValue("");
 });
 
 function testPdf() {
@@ -360,7 +430,7 @@ test("searches Bangumi anime, saves a personal rating, and restores the metadata
   page,
 }) => {
   const api = await mockGitHub(page);
-  const requests = await mockBangumi(page);
+  const requests = await mockCatalog(page);
   await connect(page);
   await page.locator("#quick-category").selectOption("anime");
   await page.locator("#bangumi-query").fill("测试动画");
@@ -386,8 +456,10 @@ test("searches Bangumi anime, saves a personal rating, and restores the metadata
     status: "completed",
     showcase: true,
   });
-  expect(requests.some(url => url.includes("type=2"))).toBe(true);
-  expect(requests.every(url => url.startsWith(bangumiProxy))).toBe(true);
+  expect(requests.some(url => url.endsWith("/subjects/100.json"))).toBe(true);
+  expect(
+    requests.every(url => url.startsWith("http://127.0.0.1:4322/bangumi/"))
+  ).toBe(true);
   expect(metadata.entry.subject.image).toMatch(/^\/images\/studio\//);
   expect(metadata.cover).toBe(metadata.entry.subject.image);
   expect(api.media()).toHaveLength(1);
@@ -421,7 +493,7 @@ test("searches games with the correct Bangumi type and supports direct subject l
   page,
 }) => {
   const api = await mockGitHub(page);
-  const requests = await mockBangumi(page);
+  const requests = await mockCatalog(page);
   await connect(page);
   await page.locator("#quick-category").selectOption("game");
   await page.locator("#bangumi-query").fill("测试游戏");
@@ -435,7 +507,7 @@ test("searches games with the correct Bangumi type and supports direct subject l
   await page.locator("#entry-showcase").uncheck();
   await page.locator("#publish-button").click();
   await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
-  expect(requests.some(url => url.includes("type=4"))).toBe(true);
+  expect(requests.some(url => url.endsWith("/subjects/200.json"))).toBe(true);
   expect(
     entrySource(api.source("src/content/posts/测试游戏.md")!).entry
   ).toMatchObject({
@@ -561,12 +633,12 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
   await expect(page.locator("#paper-reader-pane")).not.toBeVisible();
 });
 
-test("retains a review after Bangumi fails and keeps the phone album within the viewport", async ({
+test("retains a review after the site catalog fails and keeps the phone album within the viewport", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("https://api.bgm.tv/**", route => route.abort());
-  await page.route(`${bangumiProxy}/**`, route => route.abort());
+  await page.route("**/bangumi/catalog.json", route => route.abort());
   await page.goto("/studio/");
   await page.locator("#try-writing").click();
   await page.locator("#quick-category").selectOption("anime");
@@ -574,7 +646,7 @@ test("retains a review after Bangumi fails and keeps the phone album within the 
   await page.locator("#bangumi-query").fill("测试");
   await page.locator("#bangumi-search").click();
   await expect(page.locator("#studio-error")).toContainText(
-    "暂时无法连接 Bangumi"
+    "站内作品库暂时无法加载"
   );
   await expect(page.locator("#entry-comment")).toHaveValue(
     "网络失败也保留的简评"

@@ -6,6 +6,4 @@ export const studioConfig = {
   mediaDirectory: "public/images/studio",
   documentsDirectory: "public/documents/studio",
   siteUrl: "https://lyf0422.github.io",
-  bangumiProxy:
-    "https://lyf0422-github-io.yifan-liu-51f.workers.dev/api/bangumi",
 };

@@ -1,7 +1,6 @@
 import {
   mkdir,
   mkdtemp,
-  readFile,
   writeFile,
   rename,
   rm,
@@ -100,13 +99,13 @@ async function bytesLimited(response, limit) {
 // A complete snapshot is staged before replacing the last usable catalog.
 export async function syncCatalog({
   root = process.cwd(),
-  perType = 200,
+  perType = 600,
   fetcher = fetch,
   delayMs = 350,
   log = () => {},
 } = {}) {
-  if (!Number.isInteger(perType) || perType < 1 || perType > 300)
-    throw new Error("perType must be 1–300");
+  if (!Number.isInteger(perType) || perType < 1 || perType > 1000)
+    throw new Error("perType must be 1–1000");
   const output = join(root, "public", "bangumi");
   await mkdir(join(root, "public"), { recursive: true });
   const stage = await mkdtemp(join(root, "public", ".bangumi-sync-"));

@@ -33,7 +33,7 @@
 
 ## 本机保存、同步草稿和发布
 
-Anime / Game 的 Bangumi 检索与评分、Photo 多图相册、Paper Reading 原文预览与笔记，见 [分类记录与陈列指南](COLLECTIONS.md)。标题上方可以直接切换分类。添加论文后，来源与附件设置自动收起，需要修改时点开即可。
+Anime / Game 的站内热门作品检索与评分、Photo 多图相册、Paper Reading 原文预览与笔记，见 [分类记录与陈列指南](COLLECTIONS.md)。标题上方可以直接切换分类。作品资料来源于 Bangumi，每周更新精选库，检索时无需访问 Bangumi。添加论文后，来源与附件设置自动收起，需要修改时点开即可。
 
 **本机自动保存**：停止输入后约 650ms，文字、记录卡和附件保存到这个浏览器的 IndexedDB。离线也能继续写。未同步内容不会出现在其他设备上；清除浏览器站点数据会删除这些本机备份。
 
@@ -76,4 +76,4 @@ pnpm build
 pnpm test:studio
 ```
 
-集成测试模拟 GitHub 与 Bangumi API，覆盖作品检索和评分、相册排序、论文转换和 PDF 上传、图片排版、持久草稿、附件原子提交、跨设备版本冲突和自动同步，不会修改真实 GitHub 仓库。测试在本机优先使用已安装的 Microsoft Edge，其他环境可安装 Playwright Chromium。
+集成测试模拟 GitHub 和站内作品库，并阻断外部 Bangumi 请求，覆盖作品检索和评分、相册排序、论文转换和 PDF 上传、图片排版、持久草稿、附件原子提交、跨设备版本冲突和自动同步，不会修改真实 GitHub 仓库。测试在本机优先使用已安装的 Microsoft Edge，其他环境可安装 Playwright Chromium。同步脚本的完整性检查可用 `node --test scripts/sync-bangumi.test.mjs` 验证。

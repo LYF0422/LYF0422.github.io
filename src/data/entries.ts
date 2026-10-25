@@ -40,6 +40,7 @@ export const entryStatuses: Record<string, string> = {
 /** Only public HTTPS resources and this site's uploaded media may be embedded. */
 export function resourceUrl(value: unknown): string {
   if (typeof value !== "string") return "";
+  if (/^\/bangumi\/covers\/[1-9]\d*\.webp$/.test(value)) return value;
   if (
     /^\/(?:images|documents)\/studio\/[\w./%-]+$/u.test(value) &&
     !value.includes("..")

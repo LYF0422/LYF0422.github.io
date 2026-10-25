@@ -13,14 +13,17 @@ import { entryStatuses } from "@/data/entries";
       <input
         id="bangumi-query"
         type="search"
-        aria-label="检索 Bangumi"
-        placeholder="搜索作品名称 / 粘贴 Bangumi 链接"
+        aria-label="检索站内作品"
+        placeholder="输入作品名、别名或 Bangumi 编号"
         maxlength="200"
       />
       <button id="bangumi-search" type="button" class="studio-button"
-        >检索 Bangumi ↗</button
+        >搜索作品</button
       >
     </div>
+    <p id="catalog-info" class="entry-hint">
+      站内热门作品库 · 资料来自 Bangumi
+    </p>
     <p id="bangumi-status" class="entry-hint" role="status"></p>
     <div id="bangumi-results" class="bangumi-results"></div>
     <div id="bangumi-selected" class="entry-subject" hidden></div>
