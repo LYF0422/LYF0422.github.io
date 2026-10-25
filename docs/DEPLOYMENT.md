@@ -14,9 +14,9 @@
 
 Anime / Game 检索使用 `public/bangumi/` 下的静态资料和封面，与网站一起部署。浏览器仅请求当前博客域名，不再依赖 `workers.dev` 或 Bangumi API；无需购买域名。博客本身仍需在用户网络中可访问。
 
-- `catalog.json`：动画、游戏各 600 部，按 Bangumi 收藏人数选取，包含名称、别名、收录数量和更新时间。
+- `catalog.json`：动画、游戏各 600 部，以 Bangumi 收藏热度为主、评分排名为补充，包含名称、别名、收录数量和更新时间。
 - `subjects/<id>.json`：作品的基础资料。
-- `covers/<id>.webp`：压缩封面，最大 360 × 480 像素。首批 400 部作品和封面合计约 12.4 MiB；浏览器按需加载详情和封面。
+- `covers/<id>.webp`：压缩封面，最大 360 × 480 像素。浏览器按需加载详情和封面。
 
 `.github/workflows/sync-bangumi.yml` 在 GitHub 上运行下载，每周一北京时间 06:17 执行（UTC cron：`17 22 * * 0`，实际启动可能延迟）。手动更新：仓库 **Actions → Sync popular Bangumi catalog → Run workflow**。也可运行：
 

@@ -153,6 +153,22 @@ export async function syncCatalog({
     const selected = [];
     for (const type of [2, 4]) {
       const seen = new Set();
+      const accept = subjects => {
+        for (const subject of subjects) {
+          if (
+            subject.type !== type ||
+            subject.nsfw ||
+            !Number.isSafeInteger(subject.id) ||
+            subject.id <= 0 ||
+            !subject.name ||
+            seen.has(subject.id)
+          )
+            continue;
+          selected.push(subject);
+          seen.add(subject.id);
+          if (seen.size === perType) break;
+        }
+      };
       for (
         let offset = 0;
         seen.size < perType && offset < perType * 3;
@@ -174,20 +190,22 @@ export async function syncCatalog({
           }
         );
         if (!Array.isArray(page.data) || !page.data.length) break;
-        for (const subject of page.data) {
-          if (
-            subject.type !== type ||
-            subject.nsfw ||
-            !Number.isSafeInteger(subject.id) ||
-            subject.id <= 0 ||
-            !subject.name ||
-            seen.has(subject.id)
-          )
-            continue;
-          selected.push(subject);
-          seen.add(subject.id);
-          if (seen.size === perType) break;
-        }
+        accept(page.data);
+      }
+      // Search may cap deep pagination. Supplement the popular selection with
+      // highly rated public subjects from the browse endpoint, deduplicated.
+      if (seen.size < perType)
+        log(`Heat search returned ${seen.size}; supplementing ranked subjects`);
+      for (
+        let offset = 0;
+        seen.size < perType && offset < perType * 5;
+        offset += 50
+      ) {
+        const page = await json(
+          `/v0/subjects?type=${type}&sort=rank&limit=50&offset=${offset}`
+        );
+        if (!Array.isArray(page.data) || !page.data.length) break;
+        accept(page.data);
       }
       if (seen.size < perType)
         throw new Error(
@@ -282,7 +300,8 @@ export async function syncCatalog({
       version: 1,
       updatedAt: new Date().toISOString(),
       source: "https://bgm.tv",
-      selection: "public subjects sorted by collection count",
+      selection:
+        "popular public subjects by collection count, supplemented by rating rank",
       counts: { anime: perType, game: perType },
       covered,
       subjects: records,

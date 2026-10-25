@@ -123,3 +123,44 @@ test("does not publish a first catalog with broken or unexpected cover sources",
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("supplements a capped heat search with ranked works without duplicate entries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "catalog-test-"));
+  try {
+    const cover = await sharp({
+      create: { width: 10, height: 15, channels: 3, background: "white" },
+    })
+      .png()
+      .toBuffer();
+    const fetcher = async (url, init) => {
+      if (url.startsWith("https://lain.bgm.tv"))
+        return new Response(cover, {
+          headers: { "content-type": "image/png" },
+        });
+      const query = new URL(url);
+      const type = init.body
+        ? JSON.parse(init.body).filter.type[0]
+        : Number(query.searchParams.get("type"));
+      const record = id => ({
+        id: type * 100 + id,
+        type,
+        name: `Work ${id}`,
+        infobox: [],
+        images: { common: "https://lain.bgm.tv/pic/cover/test.png" },
+      });
+      if (init.body)
+        return Response.json({
+          data: query.searchParams.get("offset") === "0" ? [record(1)] : [],
+        });
+      assert.equal(query.searchParams.get("sort"), "rank");
+      return Response.json({ data: [record(1), record(2), record(3)] });
+    };
+    const data = await syncCatalog({ root, perType: 2, fetcher, delayMs: 0 });
+    assert.deepEqual(
+      data.subjects.map(row => row.id),
+      [201, 202, 401, 402]
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
