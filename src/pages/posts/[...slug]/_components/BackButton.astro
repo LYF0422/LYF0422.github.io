@@ -1,7 +1,7 @@
 ---
 import IconChevronLeft from "@/assets/icons/IconChevronLeft.svg";
 import LinkButton from "@/components/LinkButton.astro";
-import { getRelativeLocaleUrl } from "astro:i18n";
+import { getBlogUrl } from "@/utils/getBlogUrl";
 import { useTranslations } from "@/i18n";
 import config from "@/config";
 
@@ -14,7 +14,7 @@ const t = useTranslations(locale);
     <div class="app-layout flex items-center justify-start">
       <LinkButton
         id="back-button"
-        href={getRelativeLocaleUrl(locale, "")}
+        href={getBlogUrl()}
         class="focus-outline hover:text-foreground/75 -ms-2 mt-8 mb-2"
       >
         <IconChevronLeft class="inline-block size-6 rtl:rotate-180" />
@@ -31,8 +31,16 @@ const t = useTranslations(locale);
 
     const backUrl = sessionStorage.getItem("backUrl");
 
-    if (backUrl && backButton) {
-      backButton.href = backUrl;
+    if (!backUrl || !backButton) return;
+    try {
+      const url = new URL(backUrl, window.location.href);
+      if (
+        url.origin === window.location.origin &&
+        url.pathname !== window.location.pathname
+      )
+        backButton.href = `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      /* Keep the blog-list fallback for an invalid saved URL. */
     }
   }
 

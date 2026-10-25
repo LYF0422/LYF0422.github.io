@@ -37,6 +37,15 @@ async function mockGitHub(page: Page) {
   const control = {
     failBlob: false,
     race: false,
+    addPost(path: string, source: string) {
+      const sha = hash(source);
+      blobs.set(sha, {
+        content: Buffer.from(source).toString("base64"),
+        encoding: "base64",
+      });
+      files.set(path, sha);
+      trees.set(treeSha, new Map(files));
+    },
     mutateArticle() {
       const source = seedSource.replace("原始正文", "来自另一台设备的更新");
       const sha = hash(source);
@@ -1267,4 +1276,130 @@ test("explains inaccessible PDF links and recovers by uploading without losing t
   });
   await expect(reader).toHaveAttribute("data-ready", "true");
   await expect(page.locator(".tiptap")).toContainText("先记下实验结果。");
+});
+
+test("opens the article's edit link in the studio and loads that article after connecting", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await page.goto("/posts/sjtuzl-人工智能就业分析/");
+  const edit = page.getByRole("link", { name: "编辑文章", exact: true });
+  const href = (await edit.getAttribute("href"))!;
+  const target = new URL(href, "http://127.0.0.1:4322");
+  const path = target.searchParams.get("edit")!;
+  expect(target.pathname).toBe("/studio/");
+  expect(path).toBe("src/content/posts/sjtuzl-人工智能就业分析.md");
+  await expect(edit).not.toHaveAttribute("target", "_blank");
+  await expect(edit).toHaveAttribute("data-astro-reload");
+  api.addPost(path, seedSource.replace("远端记录", "从文章页继续编辑"));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(edit).toBeVisible();
+  await edit.click();
+  await expect(page).toHaveURL(/\/studio\/\?edit=/);
+  await expect(page.locator("#connect-dialog")).toBeVisible();
+  await page.locator("#github-token").fill(token);
+  await page.locator("#confirm-connect").click();
+  await expect(page.locator("#document-title")).toHaveValue("从文章页继续编辑");
+  await expect(page.locator(".tiptap")).toContainText("原始正文");
+  await expect(page).toHaveURL("http://127.0.0.1:4322/studio/");
+  expect(api.calls.every(call => call.method === "GET")).toBe(true);
+});
+
+test("opens a requested article with a saved session while preserving the current draft", async ({
+  page,
+}) => {
+  await mockGitHub(page);
+  await connect(page);
+  await write(page, "尚未发布的草稿", "返回文章编辑前写下的内容。");
+  await page.goto(`/studio/?edit=${encodeURIComponent(seedPath)}`);
+  await expect(page.locator("#document-title")).toHaveValue("远端记录");
+  await expect(page.locator("#connect-dialog")).not.toBeVisible();
+  await expect(page.locator("#local-documents")).toContainText(
+    "尚未发布的草稿"
+  );
+  await expect(page).toHaveURL("http://127.0.0.1:4322/studio/");
+});
+
+test("prefers unsynchronized local changes when entering an article's edit link", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await page.locator("#remote-documents .document-open").click();
+  await expect(page.locator("#document-title")).toHaveValue("远端记录");
+  await write(page, "本机尚未同步的标题", "保留本机修改。");
+  await page.evaluate(() =>
+    sessionStorage.removeItem("writing-studio-session")
+  );
+  const calls = api.calls.length;
+  await page.goto(`/studio/?edit=${encodeURIComponent(seedPath)}`);
+  await expect(page.locator("#document-title")).toHaveValue(
+    "本机尚未同步的标题"
+  );
+  await expect(page.locator(".tiptap")).toContainText("保留本机修改");
+  await expect(page.locator("#connect-dialog")).not.toBeVisible();
+  expect(api.calls.slice(calls)).toHaveLength(0);
+  await expect(page).toHaveURL("http://127.0.0.1:4322/studio/");
+  await page.goto("/studio/");
+  await expect(page.locator("#document-title")).toHaveValue(
+    "本机尚未同步的标题"
+  );
+});
+
+test("reports moved articles and rejects invalid edit paths without replacing the current draft", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await write(page, "保留的草稿");
+  await page.goto("/studio/?edit=src%2Fcontent%2Fposts%2Fdeleted.md");
+  await expect(page.locator("#studio-error")).toContainText("已被移动或删除");
+  await expect(page.locator("#document-title")).toHaveValue("保留的草稿");
+  const calls = api.calls.length;
+  await page.goto("/studio/?edit=src%2Fcontent%2Fposts%2F..%2F..%2FREADME.md");
+  await expect(page.locator("#studio-error")).toContainText("文章路径无效");
+  await expect(page.locator("#document-title")).toHaveValue("保留的草稿");
+  expect(
+    api.calls.slice(calls).some(call => call.path.includes("/git/blobs/"))
+  ).toBe(false);
+});
+
+test("shares canonical article URLs and returns to an internal listing", async ({
+  page,
+}) => {
+  await page.goto("/posts/sjtuzl-人工智能就业分析/");
+  const canonical = await page
+    .locator('link[rel="canonical"]')
+    .getAttribute("href");
+  const platforms = [
+    ["https://wa.me/", "text"],
+    ["https://www.facebook.com/sharer.php", "u"],
+    ["https://x.com/intent/post", "url"],
+    ["https://t.me/share/url", "url"],
+    ["https://pinterest.com/pin/create/button/", "url"],
+    ["mailto:", "body"],
+  ];
+  for (const [prefix, parameter] of platforms) {
+    const href = await page
+      .locator(`a[href^="${prefix}"]`)
+      .getAttribute("href");
+    expect(new URL(href!).searchParams.get(parameter)).toBe(canonical);
+  }
+  await expect(page.locator("#back-button")).toHaveAttribute("href", "/blog/");
+  await page.evaluate(() =>
+    sessionStorage.setItem(
+      "backUrl",
+      "/search?q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD"
+    )
+  );
+  await page.reload();
+  await expect(page.locator("#back-button")).toHaveAttribute(
+    "href",
+    "/search?q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD"
+  );
+  await page.evaluate(() =>
+    sessionStorage.setItem("backUrl", "https://example.org/elsewhere")
+  );
+  await page.reload();
+  await expect(page.locator("#back-button")).toHaveAttribute("href", "/blog/");
 });

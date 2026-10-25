@@ -27,6 +27,7 @@ import {
 import { GitHubClient, GitHubError, type RemoteFile } from "./github";
 import { CollectionEditor } from "./collections";
 import { normalizeEntry } from "@/data/entries";
+import { requestedPost } from "./navigation";
 import {
   LibraryTools,
   parseTags,
@@ -65,6 +66,34 @@ const assetUrls = new Map<string, string>();
 const assets = new Map<string, WritingAsset>();
 let collectionEditor: CollectionEditor;
 let libraryTools: LibraryTools;
+let pendingEditPath: string | null = null;
+
+function finishRequestedPost() {
+  pendingEditPath = null;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("edit");
+  history.replaceState(
+    history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`
+  );
+}
+
+async function openRequestedPost() {
+  if (!pendingEditPath || !client) return;
+  const file = remoteFiles.find(file => file.path === pendingEditPath);
+  if (!file) {
+    finishRequestedPost();
+    showError(
+      new Error(
+        "这篇文章已被移动或删除，请在左侧文章库中选择要编辑的记录。本机草稿已保留。"
+      )
+    );
+    return;
+  }
+  await openRemote(file);
+  finishRequestedPost();
+}
 
 function toast(message: string) {
   text("studio-toast", message);
@@ -1263,6 +1292,7 @@ async function connect(token: string, remember: boolean) {
   $<HTMLDialogElement>("connect-dialog").close();
   input("github-token").value = "";
   await refreshLibrary();
+  await openRequestedPost();
   renderCover();
   // Refresh node views so repository-relative images resolve on another device.
   loading = true;
@@ -1275,17 +1305,18 @@ listen("connect-form", "submit", async event => {
   button.disabled = true;
   text("connect-error", "");
   try {
+    clearError();
     await connect(
       input("github-token").value.trim(),
       input("remember-session").checked
     );
-    clearError();
     toast("GitHub 已连接，可以同步记录了。");
   } catch (error) {
     text(
       "connect-error",
       error instanceof Error ? error.message : "连接失败，请重试。"
     );
+    if (!$<HTMLDialogElement>("connect-dialog").open) showError(error);
   } finally {
     button.disabled = false;
   }
@@ -1331,10 +1362,20 @@ async function initialize() {
   input("auto-sync").checked = autoSync;
   documents = await loadDocuments();
   const returningWriter = documents.length > 0;
+  let linkError: unknown;
+  try {
+    pendingEditPath = requestedPost(window.location.search);
+  } catch (error) {
+    linkError = error;
+  }
+  const requested = pendingEditPath
+    ? documents.find(doc => doc.path === pendingEditPath)
+    : undefined;
   const selected = documents.find(
     doc => doc.id === localStorage.getItem(selectionKey)
   );
-  await openDocument(selected ?? documents[0] ?? current, false);
+  await openDocument(requested ?? selected ?? documents[0] ?? current, false);
+  if (requested) finishRequestedPost();
   if (!documents.length) await saveLocal();
   const token = sessionStorage.getItem(sessionKey);
   if (token) {
@@ -1345,7 +1386,10 @@ async function initialize() {
       showError(error);
       $<HTMLDialogElement>("connect-dialog").showModal();
     }
-  } else if (!returningWriter)
+  } else if (!returningWriter || pendingEditPath)
     $<HTMLDialogElement>("connect-dialog").showModal();
+  if (pendingEditPath && !client)
+    text("remote-hint", "连接 GitHub 后，将打开你刚才选择的文章。");
+  if (linkError) showError(linkError);
 }
 void initialize().catch(showError);

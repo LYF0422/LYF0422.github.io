@@ -130,18 +130,18 @@ const ogImage = ogImageUrl
       {title}
     </h1>
 
-    <div class="my-2 flex items-center gap-2">
+    <div class="my-2 flex flex-wrap items-center gap-2">
       <Datetime {pubDatetime} {modDatetime} {timezone} size="lg" />
       <span
         aria-hidden="true"
         class:list={[
-          "text-muted-foreground max-sm:hidden",
+          "text-muted-foreground",
           { hidden: !config.features.editPost?.enabled || hideEditPost },
         ]}
       >
         |
       </span>
-      <EditPost {hideEditPost} {post} class="max-sm:hidden" />
+      <EditPost {hideEditPost} {post} />
     </div>
 
     <article
@@ -189,8 +189,6 @@ const ogImage = ogImageUrl
     </article>
 
     <hr class="my-8 border-dashed" />
-
-    <EditPost class="sm:hidden" {hideEditPost} {post} />
 
     <BackToTopButton />
 

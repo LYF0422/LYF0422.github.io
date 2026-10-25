@@ -50,6 +50,11 @@ interface FeaturesConfig {
   editPost?:
     | {
         enabled: true;
+        editor: "studio";
+      }
+    | {
+        enabled: true;
+        editor?: "external";
         /** Base URL for the edit link, e.g. GitHub edit URL */
         url: string;
       }

@@ -24,7 +24,7 @@ export default defineAstroPaperConfig({
     showBackButton: true,
     editPost: {
       enabled: true,
-      url: "https://github.com/LYF0422/LYF0422.github.io/edit/main/",
+      editor: "studio",
     },
     search: "pagefind",
   },

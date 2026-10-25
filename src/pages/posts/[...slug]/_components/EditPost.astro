@@ -3,6 +3,7 @@ import type { CollectionEntry } from "astro:content";
 import IconEdit from "@/assets/icons/IconEdit.svg";
 import { useTranslations } from "@/i18n";
 import config from "@/config";
+import { studioEditUrl, validPostPath } from "@/studio/navigation";
 
 type Props = {
   hideEditPost?: CollectionEntry<"posts">["data"]["hideEditPost"];
@@ -13,7 +14,15 @@ type Props = {
 const { hideEditPost, post, class: className = "" } = Astro.props;
 
 const editPost = config.features.editPost;
-const href = editPost.enabled ? `${editPost.url}${post.filePath}` : "";
+const isStudio = editPost.enabled && editPost.editor === "studio";
+const href =
+  editPost.enabled &&
+  post.filePath &&
+  (!isStudio || validPostPath(post.filePath))
+    ? isStudio
+      ? studioEditUrl(post.filePath)
+      : `${editPost.url}${post.filePath.split("/").map(encodeURIComponent).join("/")}`
+    : "";
 const showEditPost = editPost.enabled && !hideEditPost && href.trim() !== "";
 
 const t = useTranslations(Astro.currentLocale);
@@ -23,8 +32,9 @@ const t = useTranslations(Astro.currentLocale);
   showEditPost && (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      target={isStudio ? undefined : "_blank"}
+      rel={isStudio ? undefined : "noopener noreferrer"}
+      data-astro-reload={isStudio}
       class:list={[
         "hover:text-accent text-muted-foreground flex justify-baseline gap-1.5",
         className,
