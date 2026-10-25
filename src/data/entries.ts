@@ -19,6 +19,24 @@ export interface GalleryPhoto {
   height: number;
 }
 
+export interface PdfRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PdfAnnotation {
+  id: string;
+  documentId: string;
+  page: number;
+  kind: "highlight" | "note";
+  color: "yellow" | "blue" | "pink";
+  rects: PdfRect[];
+  quote: string;
+  text: string;
+}
+
 export interface EntryMeta {
   showcase: boolean;
   subject: BangumiSubject | null;
@@ -26,7 +44,12 @@ export interface EntryMeta {
   status: string;
   comment: string;
   photos: GalleryPhoto[];
-  paper: { sourceUrl: string; pdfUrl: string; authors: string };
+  paper: {
+    sourceUrl: string;
+    pdfUrl: string;
+    authors: string;
+    annotations: PdfAnnotation[];
+  };
 }
 
 export const entryStatuses: Record<string, string> = {
@@ -65,6 +88,64 @@ export function pdfPreviewUrl(value: string): string {
 
 const string = (value: unknown, length = 2000) =>
   typeof value === "string" ? value.slice(0, length) : "";
+
+export function normalizeAnnotations(value: unknown): PdfAnnotation[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  return value.slice(0, 1000).flatMap(item => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      !/^[\w-]{1,100}$/.test(item.id) ||
+      ids.has(item.id) ||
+      !/^[a-f0-9]{64}$/.test(item.documentId) ||
+      !Number.isInteger(item.page) ||
+      item.page < 1 ||
+      item.page > 10000 ||
+      !["highlight", "note"].includes(item.kind)
+    )
+      return [];
+    const rects: PdfRect[] = Array.isArray(item.rects)
+      ? item.rects.slice(0, 100).flatMap((rect: PdfRect) => {
+          if (
+            !rect ||
+            ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ||
+            rect.x < 0 ||
+            rect.y < 0 ||
+            rect.x >= 1 ||
+            rect.y >= 1 ||
+            rect.width <= 0 ||
+            rect.height <= 0
+          )
+            return [];
+          return [
+            {
+              x: rect.x,
+              y: rect.y,
+              width: Math.min(rect.width, 1 - rect.x),
+              height: Math.min(rect.height, 1 - rect.y),
+            },
+          ];
+        })
+      : [];
+    if (!rects.length) return [];
+    ids.add(item.id);
+    return [
+      {
+        id: item.id,
+        documentId: item.documentId,
+        page: item.page,
+        kind: item.kind,
+        color: ["yellow", "blue", "pink"].includes(item.color)
+          ? item.color
+          : "yellow",
+        rects,
+        quote: string(item.quote),
+        text: string(item.text, 4000),
+      },
+    ];
+  });
+}
 
 export function normalizeEntry(value?: unknown): EntryMeta {
   const item = (
@@ -127,6 +208,7 @@ export function normalizeEntry(value?: unknown): EntryMeta {
       sourceUrl: resourceUrl(item.paper?.sourceUrl),
       pdfUrl: resourceUrl(item.paper?.pdfUrl),
       authors: string(item.paper?.authors, 1000),
+      annotations: normalizeAnnotations(item.paper?.annotations),
     },
   };
 }

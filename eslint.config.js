@@ -18,5 +18,13 @@ export default [
     },
   },
   { rules: { "no-console": "error" } },
-  { ignores: ["dist/**", ".astro/**", "public/pagefind/**", "**/._*"] },
+  {
+    ignores: [
+      "dist/**",
+      ".astro/**",
+      "public/pagefind/**",
+      "public/pdfjs/**",
+      "**/._*",
+    ],
+  },
 ];

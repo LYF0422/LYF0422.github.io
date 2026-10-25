@@ -16,7 +16,7 @@ Anime / Game 检索使用 `public/bangumi/` 下的静态资料和封面，与网
 
 - `catalog.json`：动画、游戏各 600 部，以 Bangumi 收藏热度为主、评分排名为补充，包含名称、别名、收录数量和更新时间。
 - `subjects/<id>.json`：作品的基础资料。
-- `covers/<id>.webp`：压缩封面，最大 360 × 480 像素。浏览器按需加载详情和封面。
+- `covers/<id>.webp`：压缩封面，最大 360 × 480 像素。当前 1,200 部作品的资料和封面合计约 36.8 MiB，搜索索引约 248 KiB；浏览器按需加载详情和封面。
 
 `.github/workflows/sync-bangumi.yml` 在 GitHub 上运行下载，每周一北京时间 06:17 执行（UTC cron：`17 22 * * 0`，实际启动可能延迟）。手动更新：仓库 **Actions → Sync popular Bangumi catalog → Run workflow**。也可运行：
 
@@ -27,6 +27,10 @@ gh workflow run sync-bangumi.yml --repo LYF0422/LYF0422.github.io --ref main
 同步脚本 `scripts/sync-bangumi.mjs` 下载公开条目，限制请求频率，压缩封面并验证完整性。同步失败保留上一版；单张封面下载失败优先复用旧封面。只有数量完整、至少 90% 封面可用时才更新，提交到 `main` 后显式触发 Pages 部署。同步工作流需要 `contents: write` 和 `actions: write` 权限，使用内置 `GITHUB_TOKEN`，无需额外密钥。
 
 已关联作品会连同封面保存到文章，不会随每周热门库的变化自动改写。仅支持库内检索，未收录条目会提示；这不是 Bangumi 全量数据库。覆盖范围可通过脚本中的 `perType` 调整，每类最多 1,000 部。
+
+## PDF 阅读与批注
+
+PDF 阅读与批注使用 `pdfjs-dist`。`pnpm dev` 和 `pnpm build` 会先运行 `scripts/prepare-pdf.mjs`，将字体、CMap 和 WASM 资源复制到 `public/pdfjs/`；这些生成文件不提交到 Git。PDF.js 和 Worker 随网站发布，不依赖外部 CDN。静态托管即可支持批注，批注数据保存在文章 frontmatter 中。
 
 ## Cloudflare Workers 托管
 

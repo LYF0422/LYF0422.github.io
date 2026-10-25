@@ -37,3 +37,6 @@ compose.override.yaml
 # browser test output
 test-results/
 playwright-report/
+
+# PDF.js resources copied from the pinned package during build
+public/pdfjs/

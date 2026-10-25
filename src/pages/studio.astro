@@ -4,6 +4,7 @@ import { studioConfig } from "@/data/studio";
 import { getAssetPath } from "@/utils/withBase";
 import StudioEntryPanel from "@/components/StudioEntryPanel.astro";
 import StudioLibraryTools from "@/components/StudioLibraryTools.astro";
+import PdfReader from "@/components/PdfReader.astro";
 import "@/styles/global.css";
 import "@/styles/studio.css";
 import "@/styles/collections.css";
@@ -19,7 +20,7 @@ import "@/styles/studio-writing.css";
     <meta name="referrer" content="no-referrer" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; connect-src 'self' https://api.github.com https://raw.githubusercontent.com; frame-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; connect-src 'self' blob: https:; frame-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>Writing Studio · Yifan's Space</title>
     <link rel="icon" type="image/png" href={getAssetPath("favicon.png")} />
@@ -272,11 +273,16 @@ import "@/styles/studio-writing.css";
                 aria-label="收起论文预览">×</button
               >
             </div>
+            <div id="paper-annotation-reader" hidden>
+              <PdfReader editable />
+            </div>
             <iframe
               id="paper-reader-frame"
               title="论文预览"
               referrerpolicy="no-referrer"></iframe>
-            <p>来源若限制内嵌，可打开原文或上传 PDF。</p>
+            <p>
+              批注随文章保存；上传 PDF 后可高亮选文、框选区域或添加位置批注。
+            </p>
           </aside>
           <article class="writing-paper" id="writing-paper">
             <fieldset id="metadata-fields" class="article-metadata">

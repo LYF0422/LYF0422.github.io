@@ -1,8 +1,9 @@
 ---
 import type { EntryMeta } from "@/data/entries";
-import { entryStatuses, pdfPreviewUrl } from "@/data/entries";
+import { entryStatuses } from "@/data/entries";
 import type { CategoryId } from "@/data/categories";
 import "@/styles/collections.css";
+import PdfReader from "@/components/PdfReader.astro";
 interface Props {
   entry: EntryMeta;
   category: CategoryId;
@@ -128,20 +129,56 @@ const paperSource = entry.paper.pdfUrl || entry.paper.sourceUrl;
           </div>
         </>
       </div>
-      <iframe
-        src={entry.paper.pdfUrl ? pdfPreviewUrl(paperSource) : paperSource}
-        title="论文原文预览"
-        loading="lazy"
-        referrerpolicy="no-referrer"
-      />
+      {entry.paper.pdfUrl ? (
+        <div
+          data-paper-pdf={paperSource}
+          data-paper-annotations={JSON.stringify(entry.paper.annotations)}
+        >
+          <PdfReader />
+          <noscript>
+            <a href={paperSource}>打开 PDF</a>
+          </noscript>
+        </div>
+      ) : (
+        <iframe
+          src={paperSource}
+          title="论文原文预览"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+        />
+      )}
       <p class="paper-preview-hint">
-        来源若限制内嵌，请打开原文；作者可在写作台上传 PDF。
+        阅读作者的批注；作者可在写作台继续标记与编辑。
       </p>
     </section>
   )
 }
 <script>
+  import type { PdfReader } from "@/studio/pdf-reader";
+  const readers = new Map<HTMLElement, PdfReader>();
   function setupReading() {
+    document
+      .querySelectorAll<HTMLElement>("[data-paper-pdf]")
+      .forEach(container => {
+        if (container.dataset.ready) return;
+        container.dataset.ready = "true";
+        void import("@/studio/pdf-reader")
+          .then(({ PdfReader }) => {
+            if (!container.isConnected) return;
+            readers.set(
+              container,
+              new PdfReader(container.querySelector("[data-pdf-reader]")!, {
+                url: container.dataset.paperPdf!,
+                annotations: JSON.parse(
+                  container.dataset.paperAnnotations || "[]"
+                ),
+              })
+            );
+          })
+          .catch(() => {
+            container.textContent = "阅读器暂时无法加载，请刷新或打开原文。";
+          });
+      });
     document
       .querySelectorAll<HTMLButtonElement>("[data-reading-wide]")
       .forEach(button => {
@@ -158,4 +195,8 @@ const paperSource = entry.paper.pdfUrl || entry.paper.sourceUrl;
   }
   setupReading();
   document.addEventListener("astro:page-load", setupReading);
+  document.addEventListener("astro:before-swap", () => {
+    readers.forEach(reader => reader.destroy());
+    readers.clear();
+  });
 </script>

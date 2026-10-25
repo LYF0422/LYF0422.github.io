@@ -7,8 +7,8 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro check && astro build && pagefind --site dist --glob '**/[!.]*.html' && cp -r dist/pagefind public/",
+    "dev": "node scripts/prepare-pdf.mjs && astro dev",
+    "build": "node scripts/prepare-pdf.mjs && astro check && astro build && pagefind --site dist --glob '**/[!.]*.html' && cp -r dist/pagefind public/",
     "preview": "astro preview",
     "sync": "astro sync",
     "astro": "astro",
@@ -35,6 +35,7 @@
     "dompurify": "^3.4.17",
     "lodash.kebabcase": "^4.1.1",
     "marked": "^18.1.1",
+    "pdfjs-dist": "^6.4.299",
     "rehype-callouts": "^2.2.0",
     "remark-collapse": "^0.1.2",
     "remark-toc": "^9.0.0",

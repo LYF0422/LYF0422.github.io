@@ -403,12 +403,17 @@ test("retries loading a failed catalog and ignores a detail response after switc
   await expect(page.locator("#document-title")).toHaveValue("");
 });
 
-function testPdf() {
+function testPdf(label = "Temporal models resolve ambiguity.") {
+  const stream = `BT /F1 12 Tf 25 340 Td (${label}) Tj ET`;
+  const second = "BT /F1 12 Tf 25 340 Td (A second page for notes.) Tj ET";
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Contents 4 0 R >>",
-    "<< /Length 0 >>\nstream\n\nendstream",
+    "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>",
+    `<< /Length ${second.length} >>\nstream\n${second}\nendstream`,
   ];
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -417,12 +422,13 @@ function testPdf() {
     pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
   });
   const start = Buffer.byteLength(pdf);
-  pdf += "xref\n0 5\n0000000000 65535 f \n";
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   offsets.slice(1).forEach(offset => {
     pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
   });
   return Buffer.from(
-    pdf + `trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`
+    pdf +
+      `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`
   );
 }
 
@@ -587,10 +593,9 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
   await write(page, "Paper notes", "这篇文章的方法与我的想法。");
   await page.locator("#paper-source").fill("https://arxiv.org/abs/1810.04703");
   await page.locator("#paper-attach").click();
-  await expect(page.locator("#paper-reader-frame")).toHaveAttribute(
-    "src",
-    "https://arxiv.org/pdf/1810.04703#zoom=page-width&navpanes=0"
-  );
+  await expect(
+    page.locator("#paper-annotation-reader [data-pdf-reader]")
+  ).toHaveAttribute("data-ready", "true");
   await expect(page.locator(".with-paper-reader")).toBeVisible();
   await expect(page.locator("#paper-attachment-details")).not.toHaveAttribute(
     "open"
@@ -603,10 +608,9 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
     mimeType: "application/pdf",
     buffer: testPdf(),
   });
-  await expect(page.locator("#paper-reader-frame")).toHaveAttribute(
-    "src",
-    /^blob:/
-  );
+  await expect(
+    page.locator("#paper-annotation-reader [data-pdf-reader]")
+  ).toHaveAttribute("data-ready", "true");
   await page.locator("#publish-button").click();
   await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
   const source = api.source("src/content/posts/paper-notes.md")!;
@@ -624,10 +628,9 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
   expect(source).not.toContain("blob:");
   expect(source).toContain("这篇文章的方法");
   await page.reload();
-  await expect(page.locator("#paper-reader-frame")).toHaveAttribute(
-    "src",
-    /^blob:/
-  );
+  await expect(
+    page.locator("#paper-annotation-reader [data-pdf-reader]")
+  ).toHaveAttribute("data-ready", "true");
   await expect(page.locator(".tiptap")).toContainText("这篇文章的方法");
   await page.locator("#paper-remove").click();
   await expect(page.locator("#paper-reader-pane")).not.toBeVisible();
@@ -1046,4 +1049,222 @@ test("supports phone editing, settings, and a public Anime category", async ({
   await expect(page.locator("main h1")).toContainText("Anime");
   await page.goto("/");
   await expect(page.locator(".collection-anime")).toBeVisible();
+});
+
+test("highlights PDF text, saves page notes with the attachment, and restores annotations from GitHub", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await write(page, "Annotated paper");
+  await page.locator("#paper-file").setInputFiles({
+    name: "reading.pdf",
+    mimeType: "application/pdf",
+    buffer: testPdf(),
+  });
+  const reader = page.locator("#paper-annotation-reader [data-pdf-reader]");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  const text = reader
+    .locator(".textLayer span")
+    .filter({ hasText: "Temporal models" });
+  await expect(text).toBeVisible();
+  await text.evaluate(span => {
+    const range = document.createRange();
+    range.selectNodeContents(span);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await reader.locator("[data-pdf-highlight]").click();
+  await expect(reader.locator(".pdf-mark")).toHaveCount(1);
+  await reader.locator(".pdf-note textarea").fill("时序信息用于消除姿态歧义。");
+  await reader.locator("[data-pdf-next]").click();
+  await expect(reader.locator(".textLayer")).toContainText("A second page");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await reader.locator("[data-pdf-page-note]").click();
+  await reader
+    .locator(".pdf-note textarea")
+    .nth(1)
+    .fill("这里需要补充对比实验。");
+  await page.locator("#publish-button").click();
+  await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
+  const metadata = entrySource(
+    api.source("src/content/posts/annotated-paper.md")!
+  );
+  expect(metadata.entry.paper.annotations).toHaveLength(2);
+  expect(metadata.entry.paper.annotations[0]).toMatchObject({
+    page: 1,
+    kind: "highlight",
+    quote: "Temporal models resolve ambiguity.",
+    text: "时序信息用于消除姿态歧义。",
+  });
+  expect(metadata.entry.paper.annotations[1]).toMatchObject({
+    page: 2,
+    kind: "note",
+    text: "这里需要补充对比实验。",
+  });
+  expect(metadata.entry.paper.annotations[0].documentId).toMatch(
+    /^[a-f0-9]{64}$/
+  );
+  expect(metadata.entry.paper.annotations[0].rects[0].width).toBeGreaterThan(
+    0.1
+  );
+  await page.evaluate(async () => {
+    await new Promise<void>(resolve => {
+      const request = indexedDB.open("yifan-writing-studio", 1);
+      request.onsuccess = () => {
+        const tx = request.result.transaction("documents", "readwrite");
+        tx.objectStore("documents").clear();
+        tx.oncomplete = () => {
+          request.result.close();
+          resolve();
+        };
+      };
+    });
+  });
+  await page.reload();
+  await page
+    .locator("#remote-documents .document-open")
+    .filter({ hasText: "annotated-paper" })
+    .click();
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(reader.locator(".pdf-note textarea").first()).toHaveValue(
+    "时序信息用于消除姿态歧义。"
+  );
+  await expect(reader.locator(".pdf-mark")).toHaveCount(1);
+  await reader.locator("[data-pdf-zoom]").selectOption("2");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  const rect = await reader.locator(".pdf-mark").evaluate(mark => ({
+    left: (mark as HTMLElement).style.left,
+    width: (mark as HTMLElement).style.width,
+  }));
+  expect(parseFloat(rect.width) / 100).toBeCloseTo(
+    metadata.entry.paper.annotations[0].rects[0].width,
+    4
+  );
+  await reader
+    .getByRole("button", { name: "第 2 页 · 批注", exact: true })
+    .click();
+  await expect(reader.locator("[data-pdf-page]")).toHaveValue("2");
+  await expect(reader.locator(".pdf-pin")).toHaveCount(1);
+  const markup = await reader.evaluate(node => node.outerHTML);
+  await page.route("**/documents/studio/public-reading.pdf", route =>
+    route.fulfill({ contentType: "application/pdf", body: testPdf() })
+  );
+  await page.goto("/posts/sjtuzl-人工智能就业分析/");
+  await page.evaluate(
+    ({ markup, annotations }) => {
+      const container = document.createElement("div");
+      container.dataset.paperPdf = "/documents/studio/public-reading.pdf";
+      container.dataset.paperAnnotations = JSON.stringify(annotations);
+      container.innerHTML = markup;
+      document.querySelector(".article-main")!.prepend(container);
+      document.dispatchEvent(new Event("astro:page-load"));
+    },
+    { markup, annotations: metadata.entry.paper.annotations }
+  );
+  const publicReader = page.locator("[data-paper-pdf] [data-pdf-reader]");
+  await expect(publicReader).toHaveAttribute("data-ready", "true");
+  await expect(publicReader.locator(".pdf-note")).toHaveCount(2);
+  await expect(publicReader.locator(".pdf-note").first()).toContainText(
+    "时序信息用于消除姿态歧义。"
+  );
+  await expect(publicReader.locator(".pdf-tools")).toBeHidden();
+  await expect(publicReader.locator("textarea")).toHaveCount(0);
+  await expect(publicReader.getByRole("button", { name: /^删除/ })).toHaveCount(
+    0
+  );
+  await publicReader
+    .getByRole("button", { name: "第 2 页 · 批注", exact: true })
+    .click();
+  await expect(publicReader.locator(".pdf-pin")).toHaveCount(1);
+});
+
+test("supports region and position annotations on a phone and keeps marks bound to the right PDF", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await page.locator("#paper-file").setInputFiles({
+    name: "scan.pdf",
+    mimeType: "application/pdf",
+    buffer: testPdf(),
+  });
+  const reader = page.locator("#paper-annotation-reader [data-pdf-reader]");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await reader.locator("[data-pdf-region]").click();
+  await reader.locator(".pdf-sheet").scrollIntoViewIfNeeded();
+  const box = (await reader.locator(".pdf-sheet").boundingBox())!;
+  await page.mouse.move(box.x + 20, box.y + 35);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 140, box.y + 70, { steps: 5 });
+  await page.mouse.up();
+  await expect(reader.locator(".pdf-note")).toHaveCount(1);
+  await reader.locator(".pdf-note textarea").fill("框选图中的方法。");
+  await reader.locator("[data-pdf-note]").click();
+  await reader.locator(".pdf-sheet").click({ position: { x: 70, y: 100 } });
+  await expect(reader.locator(".pdf-note")).toHaveCount(2);
+  await reader.locator(".pdf-note textarea").nth(1).fill("图示位置的批注。");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth
+    )
+  ).toBe(true);
+  await page.locator("#paper-attachment-details > summary").click();
+  await page.locator("#paper-file").setInputFiles({
+    name: "different.pdf",
+    mimeType: "application/pdf",
+    buffer: testPdf("Different document content."),
+  });
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(reader.locator(".pdf-note")).toHaveCount(0);
+  await expect(reader.locator(".pdf-annotations")).toContainText(
+    "其他版本 PDF 的批注已保留"
+  );
+  await page.locator("#paper-attachment-details > summary").click();
+  await page.locator("#paper-file").setInputFiles({
+    name: "scan-again.pdf",
+    mimeType: "application/pdf",
+    buffer: testPdf(),
+  });
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(reader.locator(".pdf-note textarea").first()).toHaveValue(
+    "框选图中的方法。"
+  );
+  await reader.getByRole("button", { name: "删除第 1 页批注" }).first().click();
+  await expect(reader.locator(".pdf-note")).toHaveCount(1);
+  await expect(page.locator("#save-status")).toHaveText("已自动保存在本机");
+  await page.reload();
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(reader.locator(".pdf-note")).toHaveCount(1);
+  await expect(reader.locator(".pdf-note textarea")).toHaveValue(
+    "图示位置的批注。"
+  );
+});
+
+test("explains inaccessible PDF links and recovers by uploading without losing the written notes", async ({
+  page,
+}) => {
+  await page.route("https://example.org/paper.pdf", route => route.abort());
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await page.locator(".tiptap").fill("先记下实验结果。");
+  await page.locator("#paper-source").fill("https://example.org/paper.pdf");
+  await page.locator("#paper-attach").click();
+  const reader = page.locator("#paper-annotation-reader [data-pdf-reader]");
+  await expect(reader.locator("[data-pdf-status]")).toContainText(
+    "请上传可正常打开的 PDF"
+  );
+  await page.locator("#paper-attachment-details > summary").click();
+  await page.locator("#paper-file").setInputFiles({
+    name: "reading.pdf",
+    mimeType: "application/pdf",
+    buffer: testPdf(),
+  });
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(page.locator(".tiptap")).toContainText("先记下实验结果。");
 });

@@ -2,7 +2,6 @@ import {
   entryStatuses,
   normalizeEntry,
   paperFromUrl,
-  pdfPreviewUrl,
   resourceUrl,
 } from "@/data/entries";
 import { studioConfig } from "@/data/studio";
@@ -15,6 +14,7 @@ import {
   subjectId,
 } from "./bangumi";
 import type { WritingAsset, WritingDocument } from "./model";
+import type { PdfReader } from "./pdf-reader";
 
 interface Context {
   current: () => WritingDocument;
@@ -46,6 +46,8 @@ export class CollectionEditor {
   private request?: AbortController;
   private reading = true;
   private paperNavigation = 0;
+  private pdfReader?: PdfReader;
+  private pdfReaderKey = "";
   constructor(private context: Context) {
     const on = (
       id: string,
@@ -146,6 +148,7 @@ export class CollectionEditor {
         sourceUrl: "",
         pdfUrl: "",
         authors: this.entry.paper.authors,
+        annotations: this.entry.paper.annotations,
       };
       this.render();
       context.changed();
@@ -164,6 +167,9 @@ export class CollectionEditor {
   }
   render() {
     this.request?.abort();
+    this.pdfReader?.destroy();
+    this.pdfReader = undefined;
+    this.pdfReaderKey = "";
     this.doc.entry = normalizeEntry(this.doc.entry);
     const category = this.doc.category;
     $("entry-fields").hidden = category === "notes";
@@ -533,9 +539,43 @@ export class CollectionEditor {
     $("paper-read-toggle").textContent = this.reading ? "收起预览" : "边读边写";
     const frame = $<HTMLIFrameElement>("paper-reader-frame");
     const resource = active && this.reading ? this.context.resolve(src) : "";
+    const isPdf = Boolean(resource && paper.pdfUrl);
+    $("paper-annotation-reader").hidden = !isPdf;
+    frame.hidden = isPdf;
+    const readerKey = isPdf ? `${this.doc.id}:${resource}` : "";
+    if (readerKey !== this.pdfReaderKey) {
+      this.pdfReader?.destroy();
+      this.pdfReader = undefined;
+      this.pdfReaderKey = readerKey;
+      if (isPdf) {
+        const docId = this.doc.id;
+        void import("./pdf-reader")
+          .then(({ PdfReader }) => {
+            if (this.pdfReaderKey !== readerKey) return;
+            this.pdfReader = new PdfReader(
+              $("paper-annotation-reader").querySelector("[data-pdf-reader]")!,
+              {
+                url: resource,
+                annotations: this.entry.paper.annotations,
+                canEdit: () =>
+                  !this.context.busy() &&
+                  this.doc.id === docId &&
+                  this.pdfReaderKey === readerKey,
+                changed: annotations => {
+                  if (this.doc.id !== docId || this.pdfReaderKey !== readerKey)
+                    return;
+                  this.entry.paper.annotations = annotations;
+                  this.context.changed();
+                },
+              }
+            );
+          })
+          .catch(this.context.error);
+      }
+    }
     const resolved = resource
-      ? paper.pdfUrl
-        ? pdfPreviewUrl(resource)
+      ? isPdf
+        ? "about:blank"
         : resource
       : "about:blank";
     if (frame.getAttribute("src") !== resolved) {

@@ -460,7 +460,7 @@
 .paper-reader-pane {
   min-width: 0;
 }
-.paper-reader-pane > div {
+.paper-reader-pane > div:first-child {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -488,6 +488,10 @@
   align-items: start;
   gap: 22px;
   padding: 24px;
+}
+/* Keep the writing toolbar from covering PDF tools while reading/annotating. */
+.studio-body:has(.with-paper-reader) .writing-toolbar {
+  position: static;
 }
 .with-paper-reader .writing-paper {
   padding: 20px;

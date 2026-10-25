@@ -15,3 +15,7 @@
 
 # Ignore MDX files
 *.mdx
+
+# Generated PDF.js resources
+public/pdfjs/
+public/bangumi/

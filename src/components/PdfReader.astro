@@ -1,0 +1,53 @@
+---
+import "@/styles/pdf-reader.css";
+interface Props {
+  editable?: boolean;
+}
+const { editable = false } = Astro.props;
+---
+
+<section class="pdf-reader" aria-label="PDF 阅读与批注" data-pdf-reader>
+  <div class="pdf-toolbar">
+    <button type="button" data-pdf-prev aria-label="上一页">←</button>
+    <label
+      >第 <input
+        data-pdf-page
+        type="number"
+        min="1"
+        value="1"
+        aria-label="PDF 页码"
+      /> 页</label
+    >
+    <span data-pdf-count></span>
+    <button type="button" data-pdf-next aria-label="下一页">→</button>
+    <select data-pdf-zoom aria-label="PDF 缩放">
+      <option value="1">适合宽度</option><option value="1.5">150%</option
+      ><option value="2">200%</option>
+    </select>
+  </div>
+  <div class="pdf-tools" hidden={!editable}>
+    <button type="button" data-pdf-highlight disabled>高亮选文</button>
+    <button type="button" data-pdf-region aria-pressed="false">框选高亮</button>
+    <button type="button" data-pdf-note aria-pressed="false">位置批注</button>
+    <button type="button" data-pdf-page-note>页面批注</button>
+    <select data-pdf-color aria-label="批注颜色"
+      ><option value="yellow">黄色</option><option value="blue">蓝色</option
+      ><option value="pink">粉色</option></select
+    >
+  </div>
+  <p class="pdf-status" data-pdf-status role="status">正在加载 PDF…</p>
+  <button type="button" data-pdf-retry hidden>重新加载 PDF</button>
+  <div class="pdf-scroll" tabindex="0" aria-label="PDF 页面">
+    <div class="pdf-sheet">
+      <canvas aria-label="PDF 页面图像"></canvas>
+      <div class="textLayer"></div>
+      <div class="pdf-marks"></div>
+    </div>
+  </div>
+  <details class="pdf-fallback" hidden>
+    <summary>打开普通预览</summary>
+    <iframe title="PDF 普通预览" loading="lazy" referrerpolicy="no-referrer"
+    ></iframe>
+  </details>
+  <div class="pdf-annotations" aria-label="论文批注"></div>
+</section>
