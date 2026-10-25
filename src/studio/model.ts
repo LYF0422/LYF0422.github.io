@@ -180,7 +180,11 @@ export function referencedMedia(doc: WritingDocument): Set<string> {
   );
   if (doc.cover) urls.push(doc.cover);
   const entry = normalizeEntry(doc.entry);
-  urls.push(...entry.photos.map(photo => photo.src), entry.paper.pdfUrl);
+  urls.push(
+    ...entry.photos.map(photo => photo.src),
+    entry.paper.pdfUrl,
+    entry.subject?.image ?? ""
+  );
   return new Set(
     urls
       .filter(url => /^\/(?:images|documents)\/studio\//.test(url))

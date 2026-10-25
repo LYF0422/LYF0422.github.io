@@ -6,7 +6,12 @@ import {
   resourceUrl,
 } from "@/data/entries";
 import { studioConfig } from "@/data/studio";
-import { getSubject, searchSubjects, subjectId } from "./bangumi";
+import {
+  downloadSubjectCover,
+  getSubject,
+  searchSubjects,
+  subjectId,
+} from "./bangumi";
 import type { WritingAsset, WritingDocument } from "./model";
 
 interface Context {
@@ -260,6 +265,7 @@ export class CollectionEditor {
     category: string
   ) {
     $("bangumi-status").textContent = "正在读取作品信息…";
+    let savingCover = false;
     try {
       const subject = await getSubject(id, type, request.signal);
       if (
@@ -270,6 +276,32 @@ export class CollectionEditor {
       )
         return;
       const previous = this.entry.subject;
+      let coverCached = true;
+      if (subject.image) {
+        if (
+          previous?.id === subject.id &&
+          previous.image.startsWith("/images/studio/")
+        ) {
+          subject.image = previous.image;
+        } else {
+          this.context.pending(1);
+          savingCover = true;
+          $("bangumi-status").textContent = "正在保存作品封面…";
+          try {
+            const file = await downloadSubjectCover(subject, request.signal);
+            const asset = await this.context.image(file);
+            subject.image = await this.context.store(asset);
+          } catch {
+            coverCached = false;
+          }
+        }
+      }
+      if (
+        request.signal.aborted ||
+        this.doc.id !== docId ||
+        this.doc.category !== category
+      )
+        return;
       this.entry.subject = subject;
       if (!this.doc.title.trim() || this.doc.title === previous?.name)
         this.context.title(subject.name);
@@ -278,7 +310,9 @@ export class CollectionEditor {
         this.context.cover();
       }
       $("bangumi-results").replaceChildren();
-      $("bangumi-status").textContent = "";
+      $("bangumi-status").textContent = coverCached
+        ? ""
+        : "作品信息已添加；封面暂未保存，再次选择此作品可重试。";
       this.renderSubject();
       this.context.changed();
     } catch (error) {
@@ -286,6 +320,8 @@ export class CollectionEditor {
         $("bangumi-status").textContent = "读取失败，请重试。";
         throw error;
       }
+    } finally {
+      if (savingCover) this.context.pending(-1);
     }
   }
   private renderSubject() {
@@ -297,7 +333,7 @@ export class CollectionEditor {
     if (container.hidden || !subject) return;
     if (subject.image) {
       const image = node("img");
-      image.src = subject.image;
+      image.src = this.context.resolve(subject.image);
       image.alt = subject.name;
       image.referrerPolicy = "no-referrer";
       container.append(image);
@@ -526,7 +562,7 @@ export class CollectionEditor {
       const card = node("div", "", "entry-subject");
       if (subject.image) {
         const image = node("img");
-        image.src = subject.image;
+        image.src = this.context.resolve(subject.image);
         image.alt = subject.name;
         card.append(image);
       }

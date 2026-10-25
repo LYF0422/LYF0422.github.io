@@ -321,7 +321,12 @@ function saveLocal() {
       const index = documents.findIndex(item => item.id === doc.id);
       if (index >= 0) documents[index] = doc;
       else documents.unshift(doc);
-      if (current.id === doc.id && !busy)
+      if (
+        current.id === doc.id &&
+        current.updatedAt === doc.updatedAt &&
+        !busy &&
+        !pendingImages
+      )
         text("save-status", "已自动保存在本机");
       renderLibrary();
     });

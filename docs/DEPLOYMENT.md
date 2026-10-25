@@ -12,7 +12,11 @@
 
 ## Cloudflare Workers 托管（当前配置）
 
-构建日志中的 `npx wrangler deploy` 对应 Workers Builds。仓库已提供 `wrangler.jsonc`，将 `dist` 作为静态资源发布；不需要 Worker 入口文件或 Astro SSR 适配器。文章、分类、写作台按各自的 HTML 路径访问，不存在的路径返回网站的 404 页面。
+构建日志中的 `npx wrangler deploy` 对应 Workers Builds。`wrangler.jsonc` 将 `dist` 作为静态资源发布，`workers/site.ts` 仅处理 `/api/bangumi/*` 的公开作品检索、详情和封面请求，不需要 Astro SSR 适配器。文章、分类、写作台仍按各自的 HTML 路径访问，不存在的路径返回网站的 404 页面。
+
+写作台优先通过 `src/data/studio.ts` 的 `bangumiProxy` 请求自己的 Cloudflare 服务，失败时再尝试 Bangumi 官方接口。当前地址是 `https://lyf0422-github-io.yifan-liu-51f.workers.dev/api/bangumi`，GitHub Pages 也使用此地址。中转不需要 Bangumi 令牌或付费存储，仅接受固定的公开读取接口，不转发 GitHub 令牌或浏览器 Cookie；搜索、详情和封面分别缓存 5 分钟、6 小时和 7 天。
+
+如果用户网络无法访问 `workers.dev`，中转也会不可达。可将同一个 Worker 绑定到可访问的自定义域名，再更新 `bangumiProxy` 并重新部署；写作台的连接策略会随配置更新。此方案无法保证所有中国大陆运营商均可访问。
 
 在 Cloudflare 的 **Workers & Pages → 对应 Worker → Settings → Build** 中核对：
 

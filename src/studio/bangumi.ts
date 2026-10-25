@@ -3,6 +3,7 @@ import {
   resourceUrl,
   type BangumiSubject,
 } from "@/data/entries";
+import { studioConfig } from "@/data/studio";
 
 const api = "https://api.bgm.tv";
 export interface SubjectResult {
@@ -13,46 +14,64 @@ export interface SubjectResult {
   images?: { common?: string; large?: string };
 }
 async function request(path: string, signal: AbortSignal) {
-  let response: Response;
-  try {
-    response = await fetch(`${api}${path}`, {
-      signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-      credentials: "omit",
-    });
-  } catch (error) {
-    if (signal.aborted) throw error;
-    throw new Error(
-      "暂时无法连接 Bangumi，请检查网络后重试。已填写的内容会保留。"
-    );
+  for (const base of [studioConfig.bangumiProxy, api]) {
+    let response: Response;
+    try {
+      response = await fetch(`${base}${path}`, {
+        signal: AbortSignal.any([
+          signal,
+          AbortSignal.timeout(base === api ? 6000 : 15_000),
+        ]),
+        credentials: "omit",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return { data, proxy: base !== api };
+      }
+    } catch (error) {
+      if (signal.aborted) throw error;
+      continue;
+    }
+    if ([404, 429].includes(response.status))
+      throw new Error(
+        response.status === 404
+          ? "未找到此 Bangumi 条目，或条目暂不公开。"
+          : "检索暂时较多，请稍后重试。"
+      );
   }
-  if (!response.ok)
-    throw new Error(
-      response.status === 404
-        ? "未找到此 Bangumi 条目，或条目暂不公开。"
-        : `Bangumi 暂时无法读取（${response.status}），请稍后重试。`
-    );
-  return response.json();
+  throw new Error(
+    "暂时无法连接 Bangumi，检索服务和备用线路均未连接成功。已填写的内容会保留。"
+  );
 }
 export async function searchSubjects(
   keyword: string,
   type: 2 | 4,
   signal: AbortSignal
 ): Promise<SubjectResult[]> {
-  // The public GET search supports browser CORS; selecting a result uses v0 details.
-  const result = await request(
+  const { data: result, proxy } = await request(
     `/search/subject/${encodeURIComponent(keyword)}?type=${type}&responseGroup=small&max_results=12`,
     signal
   );
   return (Array.isArray(result.list) ? result.list : [])
     .filter((item: SubjectResult) => item.type === type)
-    .slice(0, 12);
+    .slice(0, 12)
+    .map((item: SubjectResult) => ({
+      ...item,
+      images: {
+        common: coverUrl(
+          item.id,
+          item.images?.common || item.images?.large,
+          proxy
+        ),
+      },
+    }));
 }
 export async function getSubject(
   id: number,
   type: 2 | 4,
   signal: AbortSignal
 ): Promise<BangumiSubject> {
-  const result = await request(`/v0/subjects/${id}`, signal);
+  const { data: result, proxy } = await request(`/v0/subjects/${id}`, signal);
   if (result.type !== type)
     throw new Error(type === 2 ? "请选择动画条目。" : "请选择游戏条目。");
   const wanted =
@@ -80,7 +99,11 @@ export async function getSubject(
       type,
       name: result.name_cn || result.name,
       originalName: result.name,
-      image: resourceUrl(result.images?.common || result.images?.large),
+      image: coverUrl(
+        result.id,
+        result.images?.common || result.images?.large,
+        proxy
+      ),
       date: result.date || "",
       platform: result.platform || "",
       summary: result.summary || "",
@@ -88,6 +111,29 @@ export async function getSubject(
       facts,
     },
   }).subject!;
+}
+
+function coverUrl(id: number, source: unknown, proxy: boolean): string {
+  const image = resourceUrl(source);
+  return image && proxy ? `${studioConfig.bangumiProxy}/covers/${id}` : image;
+}
+
+export async function downloadSubjectCover(
+  subject: BangumiSubject,
+  signal: AbortSignal
+) {
+  const response = await fetch(subject.image, {
+    credentials: "omit",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+  });
+  if (!response.ok) throw new Error("封面暂未下载。");
+  const blob = await response.blob();
+  if (
+    blob.size > 5 * 1024 * 1024 ||
+    !/^image\/(?:jpeg|png|webp|gif|avif)$/.test(blob.type)
+  )
+    throw new Error("封面格式暂不支持。");
+  return new File([blob], `bangumi-${subject.id}`, { type: blob.type });
 }
 
 export function subjectId(value: string): number | null {
