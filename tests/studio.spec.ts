@@ -631,6 +631,53 @@ test("automatically syncs new entries as drafts", async ({ page }) => {
   );
 });
 
+test("deletes only the selected local record, cancels safely, and does not restore a pending autosave", async ({
+  page,
+}) => {
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await write(page, "保留的草稿", "这篇记录需要保留。");
+  await page.locator("#new-document").click();
+  await expect(page.locator("#document-title")).toHaveValue("");
+  await write(page, "不需要的草稿", "这篇记录准备删除。");
+  await expect(page.locator("#local-documents")).toContainText("不需要的草稿");
+  page.once("dialog", dialog => dialog.dismiss());
+  await page.locator("#delete-local-document").click();
+  await expect(page.locator("#document-title")).toHaveValue("不需要的草稿");
+  await expect(page.locator("#local-documents button")).toHaveCount(2);
+
+  await page.locator("#document-title").fill("尚在等待自动保存的草稿");
+  page.once("dialog", async dialog => {
+    expect(dialog.message()).toContain("GitHub 和网站上的文章会保留");
+    await dialog.accept();
+  });
+  await page.locator("#delete-local-document").click();
+  await expect(page.locator("#document-title")).toHaveValue("保留的草稿");
+  await expect(page.locator("#local-documents button")).toHaveCount(1);
+  await page.reload();
+  await expect(page.locator("#local-documents button")).toHaveCount(1);
+  await expect(page.locator("#document-title")).toHaveValue("保留的草稿");
+  await expect(page.locator(".tiptap")).toContainText("这篇记录需要保留");
+});
+
+test("removes a local backup without deleting its GitHub article", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await page.locator("#remote-documents button").click();
+  await expect(page.locator("#document-title")).toHaveValue("远端记录");
+  page.once("dialog", dialog => dialog.accept());
+  await page.locator("#delete-local-document").click();
+  await expect(page.locator("#local-documents")).not.toContainText("远端记录");
+  await expect(page.locator("#remote-documents button")).toHaveCount(1);
+  expect(api.source(seedPath)).toBe(seedSource);
+  expect(api.calls.filter(call => call.method !== "GET")).toHaveLength(0);
+  await page.locator("#remote-documents button").click();
+  await expect(page.locator("#document-title")).toHaveValue("远端记录");
+  await expect(page.locator(".tiptap")).toContainText("原始正文");
+});
+
 test("supports phone editing, settings, and a public Anime category", async ({
   page,
 }) => {
@@ -639,6 +686,7 @@ test("supports phone editing, settings, and a public Anime category", async ({
   await page.locator("#try-writing").click();
   await write(page, "手机记录", "在手机上也可以写下想法。");
   await page.locator("#toggle-inspector").click();
+  await expect(page.locator("#delete-local-document")).toBeVisible();
   await page.locator("#document-category").selectOption("anime");
   await page.locator("#close-inspector").click();
   await page.locator("#mode-preview").click();

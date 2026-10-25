@@ -231,7 +231,8 @@ import "@/styles/collections.css";
               ><button
                 id="paper-reader-close"
                 type="button"
-                aria-label="收起论文预览">×</button>
+                aria-label="收起论文预览">×</button
+              >
             </div>
             <iframe
               id="paper-reader-frame"
@@ -365,6 +366,13 @@ import "@/styles/collections.css";
             href={`https://github.com/${studioConfig.repository}/actions`}
             target="_blank"
             rel="noopener noreferrer">查看网站部署进度 ↗</a
+          >
+        </div>
+        <div class="local-document-actions">
+          <button
+            id="delete-local-document"
+            type="button"
+            class="studio-text-button">删除本机记录</button
           >
         </div>
       </aside>

@@ -628,6 +628,14 @@
   font-weight: 400;
   margin: 13px 0 28px;
 }
+.local-document-actions {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.local-document-actions button {
+  color: #b45d54;
+}
 .studio-field {
   display: flex;
   flex-direction: column;

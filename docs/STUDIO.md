@@ -43,6 +43,10 @@ Anime / Game 的 Bangumi 检索与评分、Photo 多图相册、Paper Reading �
 
 文章写入 `src/content/posts/<文件名>.md`，图片写入 `public/images/studio/`，PDF 写入 `public/documents/studio/`。同步后固定文件名，避免更新文章时意外更换地址。移除附件不会删除 GitHub 历史中的文件。
 
+## 删除本机记录
+
+在“本机记录”中打开不需要的文章，点击右侧设置底部的“删除本机记录”并确认。手机上先点“设置”。未同步的修改会丢失；GitHub 草稿和网站上已发布的文章会保留，也可从“GitHub 文章”重新打开。
+
 ## 在另一台设备继续
 
 1. 连接同一个仓库。

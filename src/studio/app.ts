@@ -17,7 +17,13 @@ import {
   type WritingAsset,
   type WritingDocument,
 } from "./model";
-import { loadAsset, loadDocuments, saveAsset, saveDocument } from "./storage";
+import {
+  loadAsset,
+  loadDocuments,
+  removeDocument,
+  saveAsset,
+  saveDocument,
+} from "./storage";
 import { GitHubClient, GitHubError, type RemoteFile } from "./github";
 import { CollectionEditor } from "./collections";
 import { normalizeEntry } from "@/data/entries";
@@ -47,6 +53,7 @@ let syncTimer: number | undefined;
 let toastTimer: number | undefined;
 let lastSave: Promise<void> = Promise.resolve();
 let pendingLocalWrites = 0;
+let deletingLocal = false;
 const assetUrls = new Map<string, string>();
 const assets = new Map<string, WritingAsset>();
 let collectionEditor: CollectionEditor;
@@ -294,6 +301,7 @@ function snapshot(): WritingDocument {
   return structuredClone({ ...current, html: editor.getHTML() });
 }
 function saveLocal() {
+  if (deletingLocal) return lastSave;
   clearTimeout(saveTimer);
   saveTimer = undefined;
   const doc = snapshot();
@@ -551,6 +559,7 @@ function setBusy(value: boolean) {
   $<HTMLSelectElement>("quick-category").disabled = value || preview;
   $<HTMLButtonElement>("publish-button").disabled = value;
   $<HTMLButtonElement>("sync-draft-button").disabled = value;
+  $<HTMLButtonElement>("delete-local-document").disabled = value;
 }
 async function synchronize(publishState?: boolean) {
   clearTimeout(syncTimer);
@@ -956,6 +965,32 @@ listen("document-filter", "input", renderLibrary);
 listen("refresh-library", "click", refreshLibrary);
 listen("publish-button", "click", () => synchronize(true));
 listen("sync-draft-button", "click", () => synchronize(false));
+listen("delete-local-document", "click", async () => {
+  if (!guardSwitch()) return;
+  const title = current.title.trim() || "未命名的记录";
+  if (
+    !window.confirm(
+      `删除「${title}」的本机记录？未同步的修改将丢失，GitHub 和网站上的文章会保留。`
+    )
+  )
+    return;
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  clearTimeout(syncTimer);
+  deletingLocal = true;
+  setBusy(true);
+  try {
+    // Finish queued writes first so an earlier autosave cannot restore the record.
+    await lastSave.catch(() => {});
+    await removeDocument(current.id);
+    documents = documents.filter(doc => doc.id !== current.id);
+  } finally {
+    deletingLocal = false;
+    setBusy(false);
+  }
+  await openDocument(documents[0] ?? newDocument(current.category), false);
+  toast("本机记录已删除，GitHub 和网站上的文章不受影响。");
+});
 listen("auto-sync", "change", () => {
   autoSync = input("auto-sync").checked;
   localStorage.setItem("studio-auto-sync", String(autoSync));
