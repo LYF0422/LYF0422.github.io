@@ -959,11 +959,42 @@ collectionEditor = new CollectionEditor({
 });
 
 entryDialog = new EntryDialog({
-  accept: async (doc, pdf) => {
+  importArxiv: async (id, signal, progress) => {
+    if (!client) {
+      progress("请先连接 GitHub，连接后将继续获取论文。");
+      const dialog = $<HTMLDialogElement>("connect-dialog");
+      dialog.showModal();
+      await new Promise<void>((resolve, reject) => {
+        const close = () => {
+          signal.removeEventListener("abort", abort);
+          if (client) resolve();
+          else
+            reject(
+              new Error(
+                "尚未连接 GitHub。可以再次获取，或直接上传 PDF；已填写的信息保留。"
+              )
+            );
+        };
+        const abort = () => {
+          dialog.removeEventListener("close", close);
+          dialog.close();
+          reject(signal.reason);
+        };
+        dialog.addEventListener("close", close, { once: true });
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+      });
+    }
+    if (!client) throw new Error("请先连接 GitHub。");
+    return client.importArxiv(id, signal, progress);
+  },
+  accept: async (doc, pdf, pdfPath) => {
     if (!guardSwitch()) throw new Error("正在同步，请稍后保存信息。");
     if (pdf)
       doc.entry.paper.pdfUrl = await storeAsset({
-        path: `${studioConfig.documentsDirectory}/${crypto.randomUUID()}.pdf`,
+        path: pdfPath
+          ? `public${pdfPath}`
+          : `${studioConfig.documentsDirectory}/${crypto.randomUUID()}.pdf`,
         blob: pdf,
         width: 0,
         height: 0,

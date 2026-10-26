@@ -1,0 +1,45 @@
+name: Fetch a paper for Studio
+
+on:
+  push:
+    branches: [main]
+    paths: [".paper-imports/requests/*.json"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: paper-imports
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Download requested public arXiv PDFs
+        run: python3 scripts/sync_papers.py
+      - name: Save downloads without replacing concurrent work
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          mkdir -p .paper-imports/results public/documents/studio/arxiv
+          git add .paper-imports/results public/documents/studio/arxiv
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'data(paper): cache requested arXiv PDFs'
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              gh workflow run deploy.yml --ref main
+              exit 0
+            fi
+          done
+          exit 1

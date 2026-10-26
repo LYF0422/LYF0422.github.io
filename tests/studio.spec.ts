@@ -13,6 +13,13 @@ const seedSource =
   "---\ntitle: 远端记录\ndescription: 一篇测试记录\npubDatetime: 2026-10-01T12:00:00+08:00\ncategory: anime\ndraft: true\ntags: [anime]\n---\n\n原始正文。\n";
 const hash = (value: string) => createHash("sha1").update(value).digest("hex");
 
+test.beforeEach(async ({ page }) => {
+  // Keep all tests independent of the site's evolving public paper cache.
+  await page.route("**/documents/studio/arxiv/index.json", route => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({version:1,papers:{}}),
+  }));
+});
+
 async function mockGitHub(page: Page) {
   const blobs = new Map<string, { content: string; encoding: string }>();
   const seedSha = hash(seedSource);
@@ -1865,4 +1872,130 @@ test("selects a work in the creation dialog without contacting Bangumi",async ({
   await page.locator("#entry-dialog-save").click();
   await expect(page.locator("#bangumi-selected")).toContainText("测试动画");
   expect(requests.some(url=>url.startsWith("external:"))).toBe(false);
+});
+
+async function mockPaperImport(page: Page, options: { fail?: boolean; corrupt?: boolean } = {}) {
+  const pdf = scholarlyPdf();
+  const blobSha = createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${pdf.length}\0`), pdf])).digest("hex");
+  const sha256 = createHash("sha256").update(pdf).digest("hex");
+  let requestId = "";
+  let pollCount = 0;
+  await page.route(`https://api.github.com${repository}/contents/.paper-imports/**`, async route => {
+    expect(route.request().headers().authorization).toBe(`Bearer ${token}`);
+    const headers = {"access-control-allow-origin":"*", "access-control-allow-methods":"GET,PUT,OPTIONS", "access-control-allow-headers":"*"};
+    if (route.request().method() === "OPTIONS") return route.fulfill({status:204,headers});
+    if (route.request().method() === "PUT") {
+      const data = route.request().postDataJSON();
+      const task = JSON.parse(Buffer.from(data.content,"base64").toString("utf8"));
+      expect(task).toMatchObject({version:1,id:"2406.07550"});
+      expect(data.branch).toBe("main");
+      expect(Object.keys(task).sort()).toEqual(["id","requestId","version"]);
+      requestId = task.requestId;
+      return route.fulfill({status:201,headers,contentType:"application/json",body:JSON.stringify({commit:{sha:"request-commit"}})});
+    }
+    pollCount++;
+    if(pollCount===1) return route.fulfill({status:404,headers,contentType:"application/json",body:JSON.stringify({message:"Not ready"})});
+    const result = {id:"2406.07550",requestId,path:"/documents/studio/arxiv/2406.07550.pdf",size:pdf.length,sha256:options.corrupt ? "0".repeat(64) : sha256,blobSha,...(options.fail ? {error:"arXiv returned HTTP 503"}: {})};
+    return route.fulfill({headers,contentType:"application/json",body:JSON.stringify({encoding:"base64",content:Buffer.from(JSON.stringify(result)).toString("base64")})});
+  });
+  await page.route(`https://api.github.com${repository}/git/blobs/${blobSha}`,route=>route.fulfill({contentType:"application/json",headers:{"access-control-allow-origin":"*"},body:JSON.stringify({encoding:"base64",content:pdf.toString("base64")})}));
+  return { get requestId(){return requestId;} };
+}
+
+test("gets an arXiv PDF through GitHub when the browser cannot download it",async({page})=>{
+  const api=await mockGitHub(page);
+  const job=await mockPaperImport(page);
+  await page.route("https://arxiv.org/**",route=>route.abort());
+  await connect(page);
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://arxiv.org/abs/2406.07550");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-error")).toBeVisible();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("浏览器未能下载");
+  await page.locator("#entry-dialog-github").click();
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("GitHub 正在获取");
+  await page.locator("#entry-dialog-name").fill("保留手动填写的标题");
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息",{timeout:15000});
+  expect(job.requestId).toMatch(/^[a-f0-9-]{36}$/);
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("保留手动填写的标题");
+  await expect(page.locator("#entry-dialog-authors")).toHaveValue("Alice Example, Bob Researcher");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+  await page.locator("#publish-button").click();
+  await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
+  const data=entrySource(api.source("src/content/posts/保留手动填写的标题.md")!);
+  expect(data.entry.paper.pdfUrl).toBe("/documents/studio/arxiv/2406.07550.pdf");
+  expect([...api.files.keys()].filter(path=>path.startsWith("public/documents/studio/"))).toEqual(["public/documents/studio/arxiv/2406.07550.pdf"]);
+});
+
+test("imports cached arXiv papers from the site without any arXiv request or GitHub connection",async({page})=>{
+  const pdf=scholarlyPdf();
+  let arxivRequests=0;
+  await page.route("https://arxiv.org/**",route=>{arxivRequests++;return route.abort();});
+  await page.route("**/documents/studio/arxiv/index.json",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({version:1,papers:{"2406.07550":{path:"/documents/studio/arxiv/2406.07550.pdf",size:pdf.length,sha256:createHash("sha256").update(pdf).digest("hex")}}})}));
+  await page.route("**/documents/studio/arxiv/2406.07550.pdf",route=>route.fulfill({contentType:"application/pdf",body:pdf}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://arxiv.org/pdf/2406.07550");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+  expect(arxivRequests).toBe(0);
+});
+
+test("connects to GitHub over the import dialog and continues without discarding entered information",async({page})=>{
+  await mockGitHub(page);
+  await mockPaperImport(page);
+  await page.route("https://arxiv.org/**",route=>route.abort());
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://arxiv.org/pdf/2406.07550");
+  await page.locator("#entry-dialog-github").click();
+  await expect(page.locator("#connect-dialog")).toBeVisible();
+  await expect(page.locator("#entry-dialog")).toBeVisible();
+  await page.locator("#github-token").fill(token);
+  await page.locator("#confirm-connect").click();
+  await expect(page.locator("#connect-dialog")).toBeHidden();
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息",{timeout:15000});
+  await expect(page.locator("#entry-dialog-source")).toHaveValue("https://arxiv.org/pdf/2406.07550");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+});
+
+test("shows server download failures next to the URL and preserves the article and entered title",async({page})=>{
+  await mockGitHub(page);
+  await mockPaperImport(page,{fail:true});
+  await page.route("https://arxiv.org/**",route=>route.abort());
+  await connect(page);
+  await write(page,"当前文章","保留正文。");
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-name").fill("手动论文标题");
+  await page.locator("#entry-dialog-source").fill("https://arxiv.org/pdf/2406.07550");
+  await page.locator("#entry-dialog-github").click();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("arXiv returned HTTP 503",{timeout:15000});
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("手动论文标题");
+  await page.locator("#entry-dialog-cancel").click();
+  await expect(page.locator("#document-title")).toHaveValue("当前文章");
+  await expect(page.locator(".tiptap")).toContainText("保留正文。");
+});
+
+test("rejects a corrupted server PDF before saving it",async({page})=>{
+  await mockGitHub(page);
+  await mockPaperImport(page,{corrupt:true});
+  await page.route("https://arxiv.org/**",route=>route.abort());
+  await connect(page);
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://arxiv.org/pdf/2406.07550");
+  await page.locator("#entry-dialog-github").click();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("校验未通过",{timeout:15000});
+  await page.locator("#entry-dialog-cancel").click();
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(1);
 });

@@ -7,6 +7,12 @@ import {
   type WritingAsset,
   type WritingDocument,
 } from "./model";
+import {
+  arxivPath,
+  checkPaperDigest,
+  validCachedPaper,
+  type ImportedPaper,
+} from "./paper-imports";
 import type { CategoryId } from "@/data/categories";
 
 export interface RemoteFile {
@@ -50,12 +56,14 @@ export class GitHubClient {
   private async request<T>(
     path: string,
     method = "GET",
-    data?: unknown
+    data?: unknown,
+    signal?: AbortSignal
   ): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`https://api.github.com${path}`, {
         method,
+        cache: "no-store",
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${this.token}`,
@@ -63,9 +71,12 @@ export class GitHubClient {
           ...(data ? { "Content-Type": "application/json" } : {}),
         },
         body: data ? JSON.stringify(data) : undefined,
-        signal: AbortSignal.timeout(45_000),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
+          : AbortSignal.timeout(45_000),
       });
     } catch {
+      signal?.throwIfAborted();
       throw new GitHubError(
         "暂时无法连接 GitHub。内容仍保存在本机，可恢复网络后重试。",
         0
@@ -142,6 +153,89 @@ export class GitHubClient {
   }
   rawUrl(path: string) {
     return `https://raw.githubusercontent.com/${encodePath(studioConfig.repository)}/${encodePath(studioConfig.branch)}/${encodePath(path.startsWith("/") ? `public${path}` : path)}`;
+  }
+  /** A Contents-only token can enqueue a request; the workflow downloads public arXiv PDFs. */
+  async importArxiv(
+    id: string,
+    signal: AbortSignal,
+    progress: (message: string) => void
+  ): Promise<ImportedPaper> {
+    const path = arxivPath(id);
+    const requestId = crypto.randomUUID();
+    progress("正在提交 GitHub 获取任务…");
+    await this.request(
+      `${this.base}/contents/.paper-imports/requests/${requestId}.json`,
+      "PUT",
+      {
+        message: `data(paper): request arXiv ${id}`,
+        branch: studioConfig.branch,
+        content: btoa(JSON.stringify({ version: 1, id, requestId })),
+      },
+      signal
+    );
+    progress("GitHub 正在获取论文，通常需要 1–3 分钟；可以继续填写信息。");
+    const deadline = Date.now() + 5 * 60_000;
+    while (Date.now() < deadline) {
+      signal.throwIfAborted();
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        };
+        const timer = setTimeout(() => {
+          signal.removeEventListener("abort", abort);
+          resolve();
+        }, 4_000);
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+      });
+      let result: { content: string; encoding: string };
+      try {
+        result = await this.request(
+          `${this.base}/contents/.paper-imports/results/${requestId}.json?ref=${encodePath(studioConfig.branch)}`,
+          "GET",
+          undefined,
+          signal
+        );
+      } catch (error) {
+        if (error instanceof GitHubError && error.status === 404) continue;
+        throw error;
+      }
+      if (result.encoding !== "base64")
+        throw new Error("GitHub 返回的获取结果编码无效。");
+      const item = JSON.parse(utf8FromBase64(result.content));
+      if (item.id !== id || item.requestId !== requestId)
+        throw new Error("GitHub 返回的论文与请求不匹配。");
+      if (item.error)
+        throw new Error(
+          `GitHub 获取失败：${String(item.error).slice(0, 300)} 可重试或上传 PDF。`
+        );
+      const blobSha = item.blobSha;
+      if (!validCachedPaper(item, id) || !/^[a-f0-9]{40}$/.test(blobSha))
+        throw new Error("GitHub 返回的论文信息无效。");
+      progress("论文已获取，正在传回工作台…");
+      const data = await this.request<{ content: string; encoding: string }>(
+        `${this.base}/git/blobs/${blobSha}`,
+        "GET",
+        undefined,
+        signal
+      );
+      if (data.encoding !== "base64")
+        throw new Error("无法读取 GitHub 中的 PDF。");
+      const bytes = Uint8Array.from(
+        atob(data.content.replace(/\s/g, "")),
+        char => char.charCodeAt(0)
+      );
+      if (bytes.length !== item.size)
+        throw new Error("GitHub 中的 PDF 大小与记录不一致。");
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      await checkPaperDigest(blob, item.sha256);
+      signal.throwIfAborted();
+      return { path, blob, size: item.size, sha256: item.sha256 };
+    }
+    throw new Error(
+      "GitHub 获取尚未完成。请稍后重试或查看获取进度；已填写的信息保留。"
+    );
   }
   async organizePost(file: RemoteFile, category: CategoryId, tags: string[]) {
     const source = updatePostOrganization(

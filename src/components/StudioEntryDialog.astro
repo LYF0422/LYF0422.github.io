@@ -48,6 +48,12 @@ import { categories } from "@/data/categories";
           <button id="entry-dialog-identify" type="button" class="studio-button"
             >读取信息</button
           >
+          <button
+            id="entry-dialog-github"
+            type="button"
+            class="studio-button"
+            hidden>通过 GitHub 获取</button
+          >
           <label id="entry-dialog-file-label" class="studio-button"
             >上传 PDF<input
               id="entry-dialog-file"
@@ -63,6 +69,13 @@ import { categories } from "@/data/categories";
             hidden>打开原文 ↗</a
           >
         </div>
+        <p id="entry-dialog-import-error" role="alert" hidden></p>
+        <a
+          id="entry-dialog-import-progress"
+          target="_blank"
+          rel="noopener noreferrer"
+          hidden>查看获取进度 ↗</a
+        >
         <p id="entry-dialog-file-name" class="entry-dialog-hint"></p>
         <div id="entry-dialog-results" class="entry-dialog-results"></div>
         <p

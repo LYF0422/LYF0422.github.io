@@ -40,3 +40,6 @@ playwright-report/
 
 # PDF.js resources copied from the pinned package during build
 public/pdfjs/
+
+# Python caches for paper download tasks
+__pycache__/

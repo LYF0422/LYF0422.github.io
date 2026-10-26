@@ -2,13 +2,25 @@ import { type CategoryId } from "@/data/categories";
 import { normalizeEntry, paperFromUrl } from "@/data/entries";
 import type { WritingDocument } from "./model";
 import { parseTags } from "./library";
+import {
+  arxivId,
+  cachedArxivPaper,
+  checkPaperDigest,
+  type ImportedPaper,
+} from "./paper-imports";
+import { getAssetPath } from "@/utils/withBase";
 import type { PaperMetadata } from "./pdf-metadata";
 
 const $ = <T extends HTMLElement = HTMLElement>(name: string) =>
   document.getElementById(`entry-dialog-${name}`) as T;
 const field = (name: string) => $<HTMLInputElement>(name);
 interface Context {
-  accept: (doc: WritingDocument, pdf?: Blob) => Promise<void>;
+  accept: (doc: WritingDocument, pdf?: Blob, pdfPath?: string) => Promise<void>;
+  importArxiv: (
+    id: string,
+    signal: AbortSignal,
+    progress: (message: string) => void
+  ) => Promise<ImportedPaper>;
 }
 
 /** Prepare a private copy. Dismissal never changes the active article or its attachments. */
@@ -18,6 +30,7 @@ export class EntryDialog {
   private request?: AbortController;
   private pdf?: Blob;
   private sourceKey = "";
+  private pdfPath?: string;
   private importing = false;
   private saving = false;
   private edited = new Set<string>();
@@ -62,6 +75,7 @@ export class EntryDialog {
       $("results").replaceChildren();
       $("import-status").textContent = "";
       $("error").hidden = true;
+      this.updateImportActions();
       this.setBusy(false);
     });
     $("source").addEventListener("change", () => {
@@ -72,6 +86,14 @@ export class EntryDialog {
         event.preventDefault();
         void this.identify();
       }
+    });
+    $("github").addEventListener("click", () => {
+      if (this.saving) return;
+      this.request?.abort();
+      this.request = undefined;
+      this.importing = false;
+      this.sourceKey = "";
+      void this.identify(undefined, true);
     });
     $("identify").addEventListener("click", () => void this.identify());
     $("file").addEventListener("change", () => {
@@ -143,6 +165,8 @@ export class EntryDialog {
     $("results").replaceChildren();
     $("import-status").textContent = "";
     $("error").hidden = true;
+    $("import-error").hidden = true;
+    $("import-progress").hidden = true;
     this.renderCategory();
     this.setBusy(false);
     this.dialog.showModal();
@@ -164,9 +188,16 @@ export class EntryDialog {
       ? "https://arxiv.org/abs/… 或 PDF 下载地址"
       : "例如：葬送的芙莉莲 / https://bgm.tv/subject/…";
     $("original").hidden = true;
+    this.updateImportActions();
     if (paper && this.doc && !this.edited.has("name") && !field("name").value)
       $("import-status").textContent =
         "粘贴网址后自动读取，或上传 PDF；读取后可检查并修改信息。";
+  }
+  private updateImportActions() {
+    $("github").hidden =
+      this.category !== "paper-reading" || !arxivId(field("source").value);
+    $("import-error").hidden = true;
+    $("import-progress").hidden = true;
   }
   private fill(name: string, value: string) {
     if (value && !this.edited.has(name)) field(name).value = value;
@@ -184,13 +215,14 @@ export class EntryDialog {
     this.importing = busy;
     $<HTMLButtonElement>("save").disabled = busy || this.saving;
     $<HTMLButtonElement>("identify").disabled = busy || this.saving;
+    $<HTMLButtonElement>("github").disabled = this.saving;
     field("category").disabled = this.saving;
     $<HTMLFieldSetElement>("fields").disabled = this.saving;
     $("save-hint").textContent = busy
       ? "正在读取，可以继续填写信息或取消。"
       : "先保存在本机，发布后更新网站。";
   }
-  private async identify(file?: File) {
+  private async identify(file?: File, viaGitHub = false) {
     if (!this.doc || this.saving || this.importing) return;
     const value = field("source").value.trim();
     const key = `${this.category}:${value}`;
@@ -199,6 +231,7 @@ export class EntryDialog {
     const request = (this.request = new AbortController());
     const doc = this.doc;
     $("error").hidden = true;
+    $("import-error").hidden = true;
     $("results").replaceChildren();
     this.setBusy(true);
     $("import-status").textContent = file ? "正在读取 PDF…" : "正在读取链接…";
@@ -215,8 +248,39 @@ export class EntryDialog {
             "暂时无法从这个网页定位 PDF。请提供 PDF 下载链接，或下载论文后上传文件。"
           );
         const { readPdfBytes, openPdf } = await import("./pdf-document");
+        this.pdfPath = undefined;
+        let source: Blob | string = file || paper!.pdfUrl;
+        const id = !file && arxivId(value);
+        let digest = "";
+        if (viaGitHub) {
+          if (!id)
+            throw new Error("通过 GitHub 获取目前支持公开的 arXiv 论文。");
+          const progress = $<HTMLAnchorElement>("import-progress");
+          progress.href =
+            "https://github.com/LYF0422/LYF0422.github.io/actions/workflows/import-paper.yml";
+          progress.hidden = false;
+          const imported = await this.context.importArxiv(
+            id,
+            request.signal,
+            message => {
+              if (this.request === request)
+                $("import-status").textContent = message;
+            }
+          );
+          source = imported.blob;
+          this.pdfPath = imported.path;
+          digest = imported.sha256;
+        } else if (id) {
+          const cached = await cachedArxivPaper(id, request.signal);
+          if (cached) {
+            source = getAssetPath(cached.path);
+            this.pdfPath = cached.path;
+            digest = cached.sha256;
+            $("import-status").textContent = "正在读取站内缓存的 PDF…";
+          }
+        }
         const bytes = await readPdfBytes(
-          file || paper!.pdfUrl,
+          source,
           request.signal,
           (size, total) => {
             if (this.request !== request) return;
@@ -227,6 +291,7 @@ export class EntryDialog {
         const blob = new Blob([bytes.slice().buffer], {
           type: "application/pdf",
         });
+        if (digest) await checkPaperDigest(blob, digest);
         const task = openPdf(bytes);
         const abort = () => {
           void task.destroy();
@@ -301,13 +366,25 @@ export class EntryDialog {
         this.request !== request
       )
         return;
-      if (error instanceof Error && /暂时无法从|请输入/.test(error.message))
-        this.error(error);
-      else if (this.category === "paper-reading") {
+      let message =
+        error instanceof Error ? error.message : "读取失败，请重试。";
+      if (
+        this.category === "paper-reading" &&
+        !(
+          error instanceof Error &&
+          /暂时无法从|请输入|GitHub|校验|有效的|目前支持/.test(error.message)
+        )
+      ) {
         const { pdfError } = await import("./pdf-document");
-        this.error(new Error(pdfError(error)));
-      } else this.error(error);
-      $("import-status").textContent = "读取未完成，已填写的信息保留。";
+        message = pdfError(error);
+      }
+      $("import-error").textContent = message;
+      $("import-error").hidden = false;
+      // Keep the form-level alert for submission errors and older assistive clients.
+      this.error(new Error(message));
+      $("import-status").textContent = arxivId(value)
+        ? "可点击“通过 GitHub 获取”，或上传 PDF。已填写的信息保留。"
+        : "可检查链接后重试，或上传 PDF。已填写的信息保留。";
     } finally {
       if (this.request === request) this.setBusy(false);
     }
@@ -363,7 +440,8 @@ export class EntryDialog {
       this.setBusy(false);
       await this.context.accept(
         doc,
-        category === "paper-reading" ? this.pdf : undefined
+        category === "paper-reading" ? this.pdf : undefined,
+        this.pdfPath
       );
       this.dialog.close();
     } catch (error) {

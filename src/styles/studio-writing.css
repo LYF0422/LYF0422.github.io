@@ -594,3 +594,16 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+#entry-dialog-import-error {
+  color: #b22e29;
+  font-size: 12px;
+  line-height: 1.8;
+  margin-top: 12px;
+}
+#entry-dialog-import-progress {
+  color: var(--accent);
+  font-size: 12px;
+  margin-top: 8px;
+  display: inline-block;
+}

@@ -3,6 +3,7 @@ name: Deploy AstroPaper to GitHub Pages
 on:
   push:
     branches: [main]
+    paths-ignore: [".paper-imports/requests/**"]
   workflow_dispatch:
 
 permissions:

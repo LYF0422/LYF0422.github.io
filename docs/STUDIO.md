@@ -36,7 +36,7 @@
 
 ## 本机保存、同步草稿和发布
 
-Anime / Game 的站内热门作品检索与评分、Photo 多图相册、Paper Reading 原文阅读与批注，见 [分类记录与陈列指南](COLLECTIONS.md)。标题上方可以直接切换分类。作品资料来源于 Bangumi，每周更新精选库，检索时无需访问 Bangumi。Paper Reading 创建后默认只显示 PDF 与批注；“独立笔记”可展开已有正文与写作工具，原有笔记会保留。网址支持 arXiv 摘要页/PDF、OpenReview、ACL Anthology 以及 HTTPS PDF 下载地址；粘贴 Markdown 链接也可识别。导入时下载并检查 PDF（最大 20 MB），提取可识别的信息并保存到本机，发布时一同上传。之后阅读已导入的论文无需重新连接原论文网站。首次导入仍需要浏览器能访问原 PDF；网络超时或跨域受限时可从原文下载后上传，弹窗会保留已填信息。尚未解析成功时不会创建空论文记录。阅读器支持大屏阅读、选文高亮、框选高亮和页面/位置批注。点选页面标注后可删除，也可在批注列表删除，并支持撤销删除。批注随文章保存与发布。
+Anime / Game 的站内热门作品检索与评分、Photo 多图相册、Paper Reading 原文阅读与批注，见 [分类记录与陈列指南](COLLECTIONS.md)。标题上方可以直接切换分类。作品资料来源于 Bangumi，每周更新精选库，检索时无需访问 Bangumi。Paper Reading 创建后默认只显示 PDF 与批注；“独立笔记”可展开已有正文与写作工具，原有笔记会保留。网址支持 arXiv 摘要页/PDF、OpenReview、ACL Anthology 以及 HTTPS PDF 下载地址；粘贴 Markdown 链接也可识别。导入时下载并检查 PDF（最大 20 MB），提取可识别的信息并保存到本机，发布时一同上传。之后阅读已导入的论文无需重新连接原论文网站。arXiv 优先读取站内已有缓存。尚未缓存且浏览器连不上 arXiv 时，可点“通过 GitHub 获取”：连接 GitHub 后由仓库任务下载公开论文，通常等待 1–3 分钟后继续自动填充；也可从原文下载后上传 PDF。错误原因直接显示在网址旁，弹窗会保留已填信息。获取公开论文会新增缓存和请求记录，但不会创建或发布文章。尚未解析成功时不会创建空论文记录。阅读器支持大屏阅读、选文高亮、框选高亮和页面/位置批注。点选页面标注后可删除，也可在批注列表删除，并支持撤销删除。批注随文章保存与发布。
 
 **本机自动保存**：停止输入后约 650ms，文字、记录卡和附件保存到这个浏览器的 IndexedDB。离线也能继续写。未同步内容不会出现在其他设备上；清除浏览器站点数据会删除这些本机备份。
 
@@ -80,3 +80,11 @@ pnpm test:studio
 ```
 
 集成测试模拟 GitHub 和站内作品库，并阻断外部 Bangumi 请求，覆盖作品检索和评分、相册排序、论文转换和 PDF 上传、图片排版、持久草稿、附件原子提交、跨设备版本冲突和自动同步，不会修改真实 GitHub 仓库。测试在本机优先使用已安装的 Microsoft Edge，其他环境可安装 Playwright Chromium。同步脚本的完整性检查可用 `node --test scripts/sync-bangumi.test.mjs` 验证。
+
+## arXiv 备用获取
+
+`.github/workflows/import-paper.yml` 处理 `.paper-imports/requests/` 中的公开 arXiv 编号。它只允许 arXiv 下载地址及对应重定向，限制 PDF 为 20 MB，校验文件头并记录 SHA-256；浏览器在保存前再次校验。连接令牌只提交请求、读取结果，需要的仍是 Contents 读写权限。令牌不会传给 arXiv 或写入请求文件。
+
+PDF 和缓存索引写入 `public/documents/studio/arxiv/`，结果写入 `.paper-imports/results/`。下载任务会触发一次网站部署，使之后导入相同编号可直接从本站读取；从任务取回 PDF 时无需等待站点部署。取消弹窗保留当前文章，已经提交的公开论文获取任务可能继续完成。任务提交使用正常的 Git 提交，并保留并发的文章修改。
+
+下载脚本检查：`python3 -m unittest discover -s scripts -p test_sync_papers.py`。
