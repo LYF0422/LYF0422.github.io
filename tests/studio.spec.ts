@@ -441,6 +441,57 @@ function testPdf(label = "Temporal models resolve ambiguity.") {
   );
 }
 
+function scholarlyPdf(embedded = true) {
+  const lines = [
+    [20, 735, "Learning Motion from Sparse Sensors"],
+    [11, 705, "Alice Example, Bob Researcher"],
+    [9, 685, "Published 2024 - DOI: 10.1234/sparse.2024"],
+    [12, 650, "Abstract"],
+    [
+      10,
+      630,
+      "We study temporal models for motion estimation from sparse sensors.",
+    ],
+    [
+      10,
+      615,
+      "A controlled comparison evaluates accuracy and computational cost.",
+    ],
+    [12, 580, "1 Introduction"],
+    ...Array.from({ length: 22 }, (_, i) => [
+      10,
+      560 - i * 18,
+      "Temporal context improves motion estimation under sparse observations.",
+    ]),
+  ];
+  const stream = lines
+    .map(([size, y, text]) => `BT /F1 ${size} Tf 45 ${y} Td (${text}) Tj ET`)
+    .join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Title (Learning Motion from Sparse Sensors) /Author (Alice Example, Bob Researcher) /Keywords (motion estimation; sparse sensors) >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const start = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach(offset => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  return Buffer.from(
+    pdf +
+      `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R ${embedded ? "/Info 6 0 R" : ""} >>\nstartxref\n${start}\n%%EOF\n`
+  );
+}
+
 test("searches Bangumi anime, saves a personal rating, and restores the metadata on another session", async ({
   page,
 }) => {
@@ -609,7 +660,7 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
   await expect(page.locator("#paper-attachment-details")).not.toHaveAttribute(
     "open"
   );
-  await page.locator("#paper-attachment-details > summary").click();
+  await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-authors").fill("Huang et al.");
   await page.locator("#entry-comment").fill("稀疏 IMU 的时序建模。");
   await page.locator("#paper-file").setInputFiles({
@@ -641,6 +692,7 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
     page.locator("#paper-annotation-reader [data-pdf-reader]")
   ).toHaveAttribute("data-ready", "true");
   await expect(page.locator(".tiptap")).toContainText("这篇文章的方法");
+  await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-remove").click();
   await expect(page.locator("#paper-reader-pane")).not.toBeVisible();
 });
@@ -1060,6 +1112,248 @@ test("supports phone editing, settings, and a public Anime category", async ({
   await expect(page.locator(".collection-anime")).toBeVisible();
 });
 
+test("extracts PDF paper information, collapses import controls, and saves editable metadata", async ({
+  page,
+}) => {
+  const api = await mockGitHub(page);
+  await connect(page);
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await page.locator("#paper-file").setInputFiles({
+    name: "download-123.pdf",
+    mimeType: "application/pdf",
+    buffer: scholarlyPdf(),
+  });
+  await expect(page.locator("#document-title")).toHaveValue(
+    "Learning Motion from Sparse Sensors"
+  );
+  await expect(page.locator("#document-description")).toHaveValue(
+    /We study temporal models/
+  );
+  await expect(page.locator("#paper-authors")).toHaveValue(
+    "Alice Example, Bob Researcher"
+  );
+  await expect(page.locator("#paper-year")).toHaveValue("2024");
+  await expect(page.locator("#paper-doi")).toHaveValue("10.1234/sparse.2024");
+  await expect(page.locator("#paper-abstract")).toHaveValue(
+    /controlled comparison/
+  );
+  await expect(page.locator("#paper-source")).toBeHidden();
+  await expect(page.locator("#entry-comment")).toBeHidden();
+  await expect(page.locator("#paper-settings-toggle")).toHaveAttribute(
+    "aria-expanded",
+    "false"
+  );
+  await page.locator("#paper-settings-toggle").click();
+  await expect(page.locator("#paper-authors")).toBeVisible();
+  await page.locator("#paper-authors").fill("My corrected author list");
+  await page.locator("#paper-year").fill("");
+  await page.locator("#document-tags").fill("");
+  await page.locator("#document-title").fill("My reading notes");
+  await page.locator("#document-description").fill("My own introduction.");
+  await page.locator("#paper-settings-toggle").click();
+  await page.locator("#publish-button").click();
+  await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
+  const metadata = entrySource(
+    api.source("src/content/posts/my-reading-notes.md")!
+  );
+  expect(metadata.entry.paper).toMatchObject({
+    title: "Learning Motion from Sparse Sensors",
+    authors: "My corrected author list",
+    year: "",
+    doi: "10.1234/sparse.2024",
+  });
+  await page.reload();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute(
+    "data-ready",
+    "true"
+  );
+  await expect(page.locator("#document-title")).toHaveValue("My reading notes");
+  await expect(page.locator("#document-description")).toHaveValue(
+    "My own introduction."
+  );
+  await expect(page.locator("#paper-authors")).toHaveValue(
+    "My corrected author list"
+  );
+  await expect(page.locator("#paper-year")).toHaveValue("");
+  await expect(page.locator("#document-tags")).toHaveValue("");
+});
+
+test("infers a paper title and authors from the first page while preserving a custom blog title", async ({
+  page,
+}) => {
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await page.locator("#document-title").fill("My existing title");
+  await page.locator("#paper-file").setInputFiles({
+    name: "scan-name.pdf",
+    mimeType: "application/pdf",
+    buffer: scholarlyPdf(false),
+  });
+  await expect(page.locator("#paper-authors")).toHaveValue(
+    "Alice Example, Bob Researcher"
+  );
+  await expect(page.locator("#document-title")).toHaveValue(
+    "My existing title"
+  );
+  await expect(page.locator("#paper-metadata-status")).toContainText(
+    "已自动读取"
+  );
+  await page.locator("#document-title").fill("");
+  await page.locator("#paper-file").setInputFiles({
+    name: "another-download.pdf",
+    mimeType: "application/pdf",
+    buffer: scholarlyPdf(false),
+  });
+  await expect(page.locator("#document-title")).toHaveValue(
+    "Learning Motion from Sparse Sensors"
+  );
+});
+
+test("keeps PDF selection aligned with canvas glyphs through zoom and large-screen reading", async ({
+  page,
+}) => {
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await page.locator("#paper-file").setInputFiles({
+    name: "reading.pdf",
+    mimeType: "application/pdf",
+    buffer: testPdf(),
+  });
+  const reader = page.locator("#paper-annotation-reader [data-pdf-reader]");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  const aligned = async (scope: typeof reader) => {
+    const metrics = await scope.evaluate(root => {
+      const canvas = root.querySelector("canvas")!;
+      const sheet = root.querySelector(".pdf-sheet")!.getBoundingClientRect();
+      const span = root
+        .querySelector(".textLayer span")!
+        .getBoundingClientRect();
+      const data = canvas
+        .getContext("2d")!
+        .getImageData(0, 0, canvas.width, canvas.height).data;
+      let left = canvas.width,
+        right = 0,
+        top = canvas.height,
+        bottom = 0;
+      for (let y = 0; y < canvas.height; y++)
+        for (let x = 0; x < canvas.width; x++) {
+          const index = (y * canvas.width + x) * 4;
+          if (
+            data[index] < 160 &&
+            data[index + 1] < 160 &&
+            data[index + 2] < 160
+          ) {
+            left = Math.min(left, x);
+            right = Math.max(right, x);
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
+        }
+      const ratio = canvas.width / sheet.width;
+      return {
+        density: ratio,
+        selectionLeft: span.left - sheet.left,
+        selectionRight: span.right - sheet.left,
+        selectionTop: span.top - sheet.top,
+        selectionBottom: span.bottom - sheet.top,
+        glyphLeft: left / ratio,
+        glyphRight: right / ratio,
+        glyphTop: top / ratio,
+        glyphBottom: bottom / ratio,
+      };
+    });
+    expect(metrics.density).toBeGreaterThanOrEqual(1.49);
+    expect(Math.abs(metrics.selectionLeft - metrics.glyphLeft)).toBeLessThan(4);
+    // The selection includes glyph side bearings, which scale with the text.
+    expect(Math.abs(metrics.selectionRight - metrics.glyphRight)).toBeLessThan(
+      Math.max(4, (metrics.glyphRight - metrics.glyphLeft) * 0.01)
+    );
+    expect(metrics.selectionTop).toBeLessThan(metrics.glyphTop + 3);
+    expect(metrics.selectionBottom).toBeGreaterThan(metrics.glyphBottom - 3);
+  };
+  await aligned(reader);
+  for (const zoom of ["1.5", "2"]) {
+    await reader.locator("[data-pdf-zoom]").selectOption(zoom);
+    await expect(reader).toHaveAttribute("data-ready", "true");
+    await aligned(reader);
+  }
+  await reader.locator("[data-pdf-zoom]").selectOption("1");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  const inlineWidth = (await reader.locator(".pdf-sheet").boundingBox())!.width;
+  await reader.locator("[data-pdf-expand]").click();
+  const expanded = page.locator(".pdf-reader-dialog [data-pdf-reader]");
+  await expect(
+    page.getByRole("dialog", { name: "PDF 大屏阅读" })
+  ).toBeVisible();
+  await expect
+    .poll(
+      async () => (await expanded.locator(".pdf-sheet").boundingBox())!.width
+    )
+    .toBeGreaterThan(inlineWidth + 200);
+  await expect(expanded).toHaveAttribute("data-ready", "true");
+  await aligned(expanded);
+  await expanded.locator("[data-pdf-page-note]").click();
+  await expanded
+    .locator(".pdf-note textarea")
+    .fill("Notes written while reading in the large view.");
+  await expanded.locator("[data-pdf-clear]").click();
+  await expanded.locator("[data-pdf-expand]").click();
+  await expect(page.locator(".pdf-reader-dialog")).toHaveCount(0);
+  await expect(reader.locator(".pdf-note textarea")).toHaveValue(
+    "Notes written while reading in the large view."
+  );
+  await reader.locator("[data-pdf-expand]").click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".pdf-reader-dialog")).toHaveCount(0);
+  await expect(reader.locator("[data-pdf-expand]")).toBeFocused();
+});
+
+test("selects PDF highlights on the page to delete them and can undo a deletion", async ({
+  page,
+}) => {
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await page.locator("#paper-file").setInputFiles({
+    name: "reading.pdf",
+    mimeType: "application/pdf",
+    buffer: testPdf(),
+  });
+  const reader = page.locator("[data-pdf-reader]");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await reader
+    .locator(".textLayer span")
+    .first()
+    .evaluate(span => {
+      const range = document.createRange();
+      range.selectNodeContents(span);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+  await reader.locator("[data-pdf-highlight]").click();
+  await reader.locator(".pdf-note textarea").fill("Keep this annotation.");
+  await reader.locator("[data-pdf-clear]").click();
+  await reader.locator(".textLayer span").first().scrollIntoViewIfNeeded();
+  const mark = (await reader.locator(".pdf-mark").boundingBox())!;
+  await page.mouse.click(mark.x + mark.width / 2, mark.y + mark.height / 2);
+  await expect(reader.locator("[data-pdf-delete]")).toBeVisible();
+  await reader.locator("[data-pdf-delete]").click();
+  await expect(reader.locator(".pdf-note")).toHaveCount(0);
+  await reader.locator("[data-pdf-undo]").click();
+  await expect(reader.locator(".pdf-note textarea")).toHaveValue(
+    "Keep this annotation."
+  );
+  await reader.getByRole("button", { name: "删除第 1 页批注" }).click();
+  await expect(reader.locator(".pdf-mark")).toHaveCount(0);
+  await expect(page.locator("#save-status")).toHaveText("已自动保存在本机");
+  await page.reload();
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(reader.locator(".pdf-note")).toHaveCount(0);
+});
+
 test("highlights PDF text, saves page notes with the attachment, and restores annotations from GitHub", async ({
   page,
 }) => {
@@ -1222,7 +1516,7 @@ test("supports region and position annotations on a phone and keeps marks bound 
       () => document.documentElement.scrollWidth <= innerWidth
     )
   ).toBe(true);
-  await page.locator("#paper-attachment-details > summary").click();
+  await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-file").setInputFiles({
     name: "different.pdf",
     mimeType: "application/pdf",
@@ -1233,7 +1527,7 @@ test("supports region and position annotations on a phone and keeps marks bound 
   await expect(reader.locator(".pdf-annotations")).toContainText(
     "其他版本 PDF 的批注已保留"
   );
-  await page.locator("#paper-attachment-details > summary").click();
+  await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-file").setInputFiles({
     name: "scan-again.pdf",
     mimeType: "application/pdf",
@@ -1268,7 +1562,7 @@ test("explains inaccessible PDF links and recovers by uploading without losing t
   await expect(reader.locator("[data-pdf-status]")).toContainText(
     "请上传可正常打开的 PDF"
   );
-  await page.locator("#paper-attachment-details > summary").click();
+  await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-file").setInputFiles({
     name: "reading.pdf",
     mimeType: "application/pdf",

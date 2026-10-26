@@ -110,6 +110,24 @@ const paperSource = entry.paper.pdfUrl || entry.paper.sourceUrl;
 {
   category === "paper-reading" && paperSource && (
     <section class="paper-reading-source" aria-label="论文原文">
+      {(entry.paper.authors || entry.paper.year || entry.paper.doi) && (
+        <p class="paper-credit">
+          {[entry.paper.authors, entry.paper.year].filter(Boolean).join(" · ")}
+          {entry.paper.doi && (
+            <>
+              {" "}
+              ·{" "}
+              <a
+                href={`https://doi.org/${encodeURI(entry.paper.doi)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                DOI ↗
+              </a>
+            </>
+          )}
+        </p>
+      )}
       <div class="paper-source-toolbar">
         <>
           <span>原文 / PDF</span>

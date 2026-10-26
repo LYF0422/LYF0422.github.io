@@ -5,8 +5,24 @@ import { entryStatuses } from "@/data/entries";
 <fieldset id="entry-fields" class="entry-editor" hidden>
   <div class="entry-editor-heading">
     <strong id="entry-panel-title">记录卡</strong>
-    <label><input id="entry-showcase" type="checkbox" checked /> 陈列展示</label
-    >
+    <div class="entry-heading-actions">
+      <button
+        id="paper-read-toggle"
+        type="button"
+        class="studio-text-button"
+        hidden>边读边写</button
+      >
+      <button
+        id="paper-settings-toggle"
+        type="button"
+        class="studio-text-button"
+        aria-expanded="true"
+        hidden>收起论文设置</button
+      >
+      <label id="entry-showcase-field"
+        ><input id="entry-showcase" type="checkbox" checked /> 陈列展示</label
+      >
+    </div>
   </div>
   <div id="subject-fields" hidden>
     <div class="entry-search-row">
@@ -71,7 +87,7 @@ import { entryStatuses } from "@/data/entries";
       class="paper-attachment-details"
       open
     >
-      <summary>论文来源与附件</summary>
+      <summary>论文来源、附件与信息</summary>
       <div class="entry-search-row">
         <input
           id="paper-source"
@@ -104,21 +120,40 @@ import { entryStatuses } from "@/data/entries";
       <label class="entry-inline-field"
         >作者（可选）<input id="paper-authors" placeholder="论文作者" /></label
       >
+      <div class="entry-review-fields">
+        <label
+          >发表年份<input
+            id="paper-year"
+            inputmode="numeric"
+            maxlength="4"
+            placeholder="自动识别 / 手动填写"
+          /></label
+        >
+        <label
+          >DOI<input
+            id="paper-doi"
+            placeholder="10.xxxx/…"
+            maxlength="300"
+          /></label
+        >
+      </div>
+      <label class="entry-inline-field"
+        >论文摘要<textarea
+          id="paper-abstract"
+          rows="4"
+          maxlength="2000"
+          placeholder="自动读取 PDF 摘要，也可手动补充"></textarea></label
+      >
+      <p id="paper-metadata-status" class="entry-hint" role="status"></p>
     </details>
     <div class="paper-upload-row">
-      <button
-        id="paper-read-toggle"
-        type="button"
-        class="studio-text-button"
-        hidden>边读边写</button
-      >
       <button id="paper-remove" type="button" class="studio-text-button" hidden
         >移除论文</button
       >
     </div>
     <p id="paper-status" class="entry-hint" role="status"></p>
   </div>
-  <label class="entry-inline-field"
+  <label id="entry-comment-field" class="entry-inline-field"
     ><span id="entry-comment-label">简评</span><textarea
       id="entry-comment"
       rows="2"

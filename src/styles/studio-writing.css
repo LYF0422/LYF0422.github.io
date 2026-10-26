@@ -125,6 +125,34 @@
 .paper-attachment-details[open] > summary {
   margin-bottom: 16px;
 }
+.entry-heading-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.entry-heading-actions button {
+  white-space: nowrap;
+  color: var(--accent);
+}
+.entry-editor.paper-setup-collapsed .paper-attachment-details,
+.entry-editor.paper-setup-collapsed #entry-comment-field,
+.entry-editor.paper-setup-collapsed #entry-showcase-field,
+.entry-editor.paper-setup-collapsed #paper-remove,
+.entry-editor.paper-setup-collapsed #paper-status {
+  display: none;
+}
+.studio-body .entry-editor.paper-setup-collapsed {
+  padding: 12px 15px;
+}
+.entry-editor.paper-setup-collapsed .entry-editor-heading {
+  margin: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.entry-editor.paper-setup-collapsed .paper-upload-row {
+  margin: 0;
+}
 .is-preview .article-options,
 .is-preview .template-heading {
   display: none;

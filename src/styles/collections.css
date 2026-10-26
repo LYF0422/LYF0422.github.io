@@ -233,6 +233,13 @@
   font-size: 11px;
   margin-bottom: 12px;
 }
+.paper-credit {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+  margin-bottom: 14px;
+}
 .paper-source-toolbar > div {
   display: flex;
   gap: 16px;
@@ -484,7 +491,7 @@
 }
 .studio-body .paper-stage.with-paper-reader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
   align-items: start;
   gap: 22px;
   padding: 24px;
@@ -502,6 +509,14 @@
 .with-paper-reader .paper-reader-pane {
   position: sticky;
   top: 20px;
+}
+@media (max-width: 1100px) {
+  .studio-body .paper-stage.with-paper-reader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .with-paper-reader .paper-reader-pane {
+    position: static;
+  }
 }
 @media (max-width: 900px) {
   .showcase-grid {

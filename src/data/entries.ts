@@ -45,9 +45,13 @@ export interface EntryMeta {
   comment: string;
   photos: GalleryPhoto[];
   paper: {
+    title: string;
     sourceUrl: string;
     pdfUrl: string;
     authors: string;
+    abstract: string;
+    year: string;
+    doi: string;
     annotations: PdfAnnotation[];
   };
 }
@@ -205,9 +209,18 @@ export function normalizeEntry(value?: unknown): EntryMeta {
           .filter(photo => photo.src)
       : [],
     paper: {
+      title: string(item.paper?.title, 500),
       sourceUrl: resourceUrl(item.paper?.sourceUrl),
       pdfUrl: resourceUrl(item.paper?.pdfUrl),
       authors: string(item.paper?.authors, 1000),
+      abstract: string(item.paper?.abstract, 2000),
+      year: /^(19|20)\d{2}$/.test(String(item.paper?.year ?? ""))
+        ? String(item.paper?.year)
+        : "",
+      doi: string(item.paper?.doi, 300).replace(
+        /^https?:\/\/(?:dx\.)?doi\.org\//i,
+        ""
+      ),
       annotations: normalizeAnnotations(item.paper?.annotations),
     },
   };

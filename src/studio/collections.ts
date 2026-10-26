@@ -15,6 +15,7 @@ import {
 } from "./bangumi";
 import type { WritingAsset, WritingDocument } from "./model";
 import type { PdfReader } from "./pdf-reader";
+import type { PaperMetadata } from "./pdf-metadata";
 
 interface Context {
   current: () => WritingDocument;
@@ -24,6 +25,8 @@ interface Context {
   store: (asset: WritingAsset) => Promise<string>;
   pending: (count: number) => void;
   title: (value: string) => void;
+  description: (value: string) => void;
+  tags: (value: string[]) => void;
   cover: () => void;
   error: (error: unknown) => void;
   busy: () => boolean;
@@ -48,6 +51,7 @@ export class CollectionEditor {
   private paperNavigation = 0;
   private pdfReader?: PdfReader;
   private pdfReaderKey = "";
+  private identifying = false;
   constructor(private context: Context) {
     const on = (
       id: string,
@@ -135,6 +139,20 @@ export class CollectionEditor {
       this.entry.paper.authors = input("paper-authors").value;
       context.changed();
     });
+    for (const field of ["year", "doi", "abstract"] as const)
+      on(`paper-${field}`, "input", () => {
+        this.entry.paper[field] = (
+          document.getElementById(`paper-${field}`) as HTMLInputElement
+        ).value;
+        context.changed();
+      });
+    on("paper-settings-toggle", "click", () => {
+      this.paperSettings(
+        !$("entry-fields").classList.contains("paper-setup-collapsed")
+      );
+      if (!$("entry-fields").classList.contains("paper-setup-collapsed"))
+        $<HTMLDetailsElement>("paper-attachment-details").open = true;
+    });
     on("paper-read-toggle", "click", () => {
       this.reading = !this.reading;
       this.updatePaper();
@@ -145,10 +163,9 @@ export class CollectionEditor {
     });
     on("paper-remove", "click", () => {
       this.entry.paper = {
+        ...this.entry.paper,
         sourceUrl: "",
         pdfUrl: "",
-        authors: this.entry.paper.authors,
-        annotations: this.entry.paper.annotations,
       };
       this.render();
       context.changed();
@@ -166,6 +183,7 @@ export class CollectionEditor {
       `站内热门作品库 · ${catalog.counts.anime} 部动画 / ${catalog.counts.game} 部游戏 · ${new Date(catalog.updatedAt).toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" })} 更新 · 来源 Bangumi`;
   }
   render() {
+    this.identifying = false;
     this.request?.abort();
     this.pdfReader?.destroy();
     this.pdfReader = undefined;
@@ -204,12 +222,39 @@ export class CollectionEditor {
     input("paper-source").value = this.entry.paper.sourceUrl;
     input("paper-pdf").value = this.entry.paper.pdfUrl;
     input("paper-authors").value = this.entry.paper.authors;
+    input("paper-year").value = this.entry.paper.year;
+    input("paper-doi").value = this.entry.paper.doi;
+    $<HTMLTextAreaElement>("paper-abstract").value = this.entry.paper.abstract;
+    $("paper-metadata-status").textContent = "";
     $<HTMLDetailsElement>("paper-attachment-details").open = !(
       this.entry.paper.sourceUrl || this.entry.paper.pdfUrl
     );
     this.renderSubject();
     this.renderPhotos();
     this.updatePaper();
+    this.paperSettings(
+      Boolean(this.entry.paper.sourceUrl || this.entry.paper.pdfUrl)
+    );
+  }
+  private paperSettings(collapsed: boolean) {
+    const paper = this.doc.category === "paper-reading";
+    $("entry-fields").classList.toggle(
+      "paper-setup-collapsed",
+      paper && collapsed
+    );
+    $("paper-settings-toggle").hidden =
+      !paper || !(this.entry.paper.pdfUrl || this.entry.paper.sourceUrl);
+    $("paper-settings-toggle").textContent = collapsed
+      ? "论文设置"
+      : "收起论文设置";
+    $("paper-settings-toggle").setAttribute(
+      "aria-expanded",
+      String(!collapsed)
+    );
+    if (paper)
+      $("entry-panel-title").textContent = collapsed
+        ? "论文已导入"
+        : "论文与笔记";
   }
   private async search() {
     const keyword = input("bangumi-query").value.trim();
@@ -495,7 +540,9 @@ export class CollectionEditor {
     input("paper-pdf").value = this.entry.paper.pdfUrl;
     $<HTMLDetailsElement>("paper-attachment-details").open = false;
     this.reading = true;
+    this.identifying = true;
     this.updatePaper();
+    this.paperSettings(true);
     this.context.changed();
   }
   private async uploadPdf(file: File) {
@@ -514,12 +561,16 @@ export class CollectionEditor {
         height: 0,
       });
       this.entry.paper.pdfUrl = path;
-      if (!this.doc.title.trim())
-        this.context.title(file.name.replace(/\.pdf$/i, ""));
+      if (!this.doc.title.trim() || this.doc.title === this.entry.paper.title) {
+        this.entry.paper.title = file.name.replace(/\.pdf$/i, "");
+        this.context.title(this.entry.paper.title);
+      }
       input("paper-pdf").value = path;
       $<HTMLDetailsElement>("paper-attachment-details").open = false;
       this.reading = true;
+      this.identifying = true;
       this.updatePaper();
+      this.paperSettings(true);
       this.context.changed();
     } finally {
       this.context.pending(-1);
@@ -549,6 +600,13 @@ export class CollectionEditor {
       this.pdfReaderKey = readerKey;
       if (isPdf) {
         const docId = this.doc.id;
+        const baseline = {
+          title: this.doc.title,
+          description: this.doc.description,
+          paper: { ...this.entry.paper },
+        };
+        const importing = this.identifying;
+        this.identifying = false;
         void import("./pdf-reader")
           .then(({ PdfReader }) => {
             if (this.pdfReaderKey !== readerKey) return;
@@ -557,6 +615,15 @@ export class CollectionEditor {
               {
                 url: resource,
                 annotations: this.entry.paper.annotations,
+                metadata: metadata => {
+                  if (
+                    this.doc.id !== docId ||
+                    this.pdfReaderKey !== readerKey ||
+                    this.context.busy()
+                  )
+                    return;
+                  this.applyMetadata(metadata, baseline, importing);
+                },
                 canEdit: () =>
                   !this.context.busy() &&
                   this.doc.id === docId &&
@@ -598,6 +665,61 @@ export class CollectionEditor {
       : active && !paper.pdfUrl
         ? "网页若不允许内嵌，可打开原文或上传 PDF。"
         : "";
+  }
+  private applyMetadata(
+    metadata: PaperMetadata,
+    baseline: {
+      title: string;
+      description: string;
+      paper: WritingDocument["entry"]["paper"];
+    },
+    importing: boolean
+  ) {
+    // Reopening a saved article must preserve fields the author deliberately cleared.
+    if (!importing && baseline.paper.title) return;
+    const paper = this.entry.paper;
+    let changed = false;
+    if (
+      metadata.title &&
+      this.doc.title === baseline.title &&
+      (!this.doc.title.trim() || this.doc.title === baseline.paper.title)
+    ) {
+      this.context.title(metadata.title);
+      changed = true;
+    }
+    if (metadata.title && paper.title !== metadata.title) {
+      paper.title = metadata.title;
+      changed = true;
+    }
+    for (const field of ["authors", "year", "doi", "abstract"] as const) {
+      if (
+        !metadata[field] ||
+        (paper[field] && !(importing && paper[field] === baseline.paper[field]))
+      )
+        continue;
+      paper[field] = metadata[field];
+      (document.getElementById(`paper-${field}`) as HTMLInputElement).value =
+        metadata[field];
+      changed = true;
+    }
+    if (
+      metadata.abstract &&
+      this.doc.description === baseline.description &&
+      (!this.doc.description.trim() ||
+        this.doc.description === baseline.paper.abstract.slice(0, 500))
+    ) {
+      this.context.description(metadata.abstract.slice(0, 500));
+      changed = true;
+    }
+    if (!this.doc.tags.length && metadata.keywords.length) {
+      this.context.tags(metadata.keywords);
+      changed = true;
+    }
+    $("paper-metadata-status").textContent =
+      metadata.title || metadata.authors
+        ? "已自动读取论文信息，可在这里修改。"
+        : "PDF 未提供可识别的论文信息，可手动填写。";
+    if (changed) this.context.changed();
   }
   setPreview(preview: boolean) {
     $("entry-fields").hidden = preview || this.doc.category === "notes";

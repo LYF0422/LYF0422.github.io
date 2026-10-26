@@ -7,6 +7,7 @@ import {
   type PdfRect,
 } from "@/data/entries";
 import { getAssetPath } from "@/utils/withBase";
+import { readPaperMetadata, type PaperMetadata } from "./pdf-metadata";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const element = <K extends keyof HTMLElementTagNameMap>(
@@ -24,6 +25,7 @@ interface Options {
   annotations: PdfAnnotation[];
   canEdit?: () => boolean;
   changed?: (annotations: PdfAnnotation[]) => void;
+  metadata?: (metadata: PaperMetadata) => void;
 }
 
 /** Canvas/text rendering and normalized annotation coordinates share one viewport. */
@@ -46,6 +48,13 @@ export class PdfReader {
   private sheet: HTMLElement;
   private marks: HTMLElement;
   private scroll: HTMLElement;
+  private selectedId = "";
+  private deleted?: { annotation: PdfAnnotation; index: number };
+  private dialog?: HTMLDialogElement;
+  private placeholder?: Comment;
+  private returnFocus?: HTMLElement;
+  private viewKey = "";
+  private notesBeforeExpand = true;
 
   constructor(
     private root: HTMLElement,
@@ -56,6 +65,8 @@ export class PdfReader {
     this.marks = this.find(".pdf-marks");
     this.scroll = this.find(".pdf-scroll");
     this.find(".pdf-tools").hidden = !options.changed;
+    this.find("[data-pdf-mark-actions]").hidden = true;
+    this.find("[data-pdf-delete]").hidden = !options.changed;
     this.on(this.find("[data-pdf-prev]"), "click", () =>
       this.go(this.page - 1)
     );
@@ -70,6 +81,27 @@ export class PdfReader {
     });
     this.on(this.find("[data-pdf-retry]"), "click", () => {
       void this.load();
+    });
+    this.on(this.find("[data-pdf-expand]"), "click", () => this.expand());
+    this.on(this.find("[data-pdf-notes-toggle]"), "click", () => {
+      this.showNotes(Boolean(this.find(".pdf-sidebar").hidden));
+    });
+    this.on(this.find("[data-pdf-delete]"), "click", () =>
+      this.remove(this.selectedId)
+    );
+    this.on(this.find("[data-pdf-clear]"), "click", () =>
+      this.selectAnnotation("")
+    );
+    this.on(this.find("[data-pdf-undo]"), "click", () => {
+      if (!this.deleted || !this.editable()) return;
+      const { annotation, index } = this.deleted;
+      this.annotations.splice(index, 0, annotation);
+      this.deleted = undefined;
+      this.find("[data-pdf-undo]").hidden = true;
+      this.save();
+      this.renderList();
+      this.selectAnnotation(annotation.id);
+      this.status("已恢复删除的批注。");
     });
     this.on(this.find("[data-pdf-highlight]"), "pointerdown", e =>
       e.preventDefault()
@@ -95,12 +127,48 @@ export class PdfReader {
       this.pointerMove(e as PointerEvent)
     );
     this.on(this.sheet, "pointerup", e => this.pointerUp(e as PointerEvent));
+    this.on(this.sheet, "click", event => {
+      if (this.mode !== "select" || !window.getSelection()?.isCollapsed) return;
+      const point = this.point(event as PointerEvent);
+      const hit = [...this.annotations]
+        .reverse()
+        .find(
+          a =>
+            a.documentId === this.documentId &&
+            a.page === this.page &&
+            a.rects.some(
+              r =>
+                point.x >= r.x &&
+                point.x <= r.x + r.width &&
+                point.y >= r.y &&
+                point.y <= r.y + r.height
+            )
+        );
+      this.selectAnnotation(hit?.id || "");
+    });
     this.on(this.sheet, "pointercancel", () => {
       this.drag = undefined;
       this.renderMarks();
     });
     this.on(this.root, "keydown", e => {
-      if ((e as KeyboardEvent).key === "Escape") this.setMode("select");
+      const event = e as KeyboardEvent;
+      if (event.key === "Escape") {
+        if (this.mode !== "select" || this.selectedId) {
+          event.preventDefault();
+          this.setMode("select");
+          this.selectAnnotation("");
+        }
+      }
+      if (
+        ["Delete", "Backspace"].includes(event.key) &&
+        this.selectedId &&
+        !(event.target as HTMLElement).closest(
+          "input, textarea, select, [contenteditable=true]"
+        )
+      ) {
+        event.preventDefault();
+        this.remove(this.selectedId);
+      }
     });
     let previousWidth = 0;
     this.observer = new ResizeObserver(entries => {
@@ -134,9 +202,56 @@ export class PdfReader {
       (!this.options.canEdit || this.options.canEdit())
     );
   }
+  private showNotes(show: boolean) {
+    this.find(".pdf-sidebar").hidden = !show;
+    this.root.classList.toggle("pdf-notes-open", show);
+    this.find("[data-pdf-notes-toggle]").setAttribute(
+      "aria-expanded",
+      String(show)
+    );
+  }
+  private expand() {
+    if (this.dialog) {
+      this.collapse();
+      return;
+    }
+    this.returnFocus = document.activeElement as HTMLElement;
+    this.notesBeforeExpand = !this.find(".pdf-sidebar").hidden;
+    if (window.matchMedia("(max-width: 899px)").matches) this.showNotes(false);
+    this.placeholder = document.createComment("PDF reader position");
+    this.root.before(this.placeholder);
+    const dialog = element("dialog", "", "pdf-reader-dialog");
+    dialog.setAttribute("aria-label", "PDF 大屏阅读");
+    dialog.append(this.root);
+    document.body.append(dialog);
+    this.dialog = dialog;
+    this.root.classList.add("is-expanded");
+    this.find("[data-pdf-expand]").textContent = "退出大屏";
+    this.find("[data-pdf-expand]").setAttribute("aria-pressed", "true");
+    document.body.classList.add("pdf-reading-open");
+    this.on(dialog, "close", () => this.collapse());
+    dialog.showModal();
+    this.find("[data-pdf-expand]").focus();
+  }
+  private collapse() {
+    if (!this.dialog) return;
+    const dialog = this.dialog;
+    this.dialog = undefined;
+    this.placeholder?.replaceWith(this.root);
+    this.placeholder = undefined;
+    this.root.classList.remove("is-expanded");
+    this.find("[data-pdf-expand]").textContent = "大屏阅读";
+    this.find("[data-pdf-expand]").setAttribute("aria-pressed", "false");
+    dialog.close();
+    dialog.remove();
+    document.body.classList.remove("pdf-reading-open");
+    this.showNotes(this.notesBeforeExpand);
+    this.returnFocus?.focus({ preventScroll: true });
+  }
   private async load() {
     this.ready = false;
     this.root.dataset.ready = "false";
+    this.viewKey = "";
     this.find("[data-pdf-retry]").hidden = true;
     this.find(".pdf-fallback").hidden = true;
     this.scroll.hidden = true;
@@ -190,7 +305,16 @@ export class PdfReader {
       );
       this.find("[data-pdf-count]").textContent = `/ ${this.pdf.numPages}`;
       this.scroll.hidden = false;
+      this.showNotes(true);
       this.renderList();
+      if (this.options.metadata) {
+        void readPaperMetadata(this.pdf)
+          .then(metadata => {
+            if (!this.lifecycle.signal.aborted)
+              this.options.metadata?.(metadata);
+          })
+          .catch(() => {});
+      }
       await this.draw();
     } catch (error) {
       if (this.lifecycle.signal.aborted) return;
@@ -215,6 +339,18 @@ export class PdfReader {
   }
   private async draw() {
     if (!this.pdf || this.lifecycle.signal.aborted) return;
+    if (!this.scroll.clientWidth) return;
+    const style = getComputedStyle(this.scroll);
+    const available = Math.max(
+      180,
+      this.scroll.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight)
+    );
+    const zoom = Number(this.find<HTMLSelectElement>("[data-pdf-zoom]").value);
+    const viewKey = `${this.page}:${available}:${zoom}:${window.devicePixelRatio}`;
+    if (this.ready && this.viewKey === viewKey) return;
+    this.viewKey = viewKey;
     const revision = ++this.revision;
     this.ready = false;
     this.root.dataset.ready = "false";
@@ -232,12 +368,8 @@ export class PdfReader {
       const page = await this.pdf.getPage(this.page);
       if (revision !== this.revision || this.lifecycle.signal.aborted) return;
       const base = page.getViewport({ scale: 1 });
-      const zoom = Number(
-        this.find<HTMLSelectElement>("[data-pdf-zoom]").value
-      );
       const viewport = page.getViewport({
-        scale:
-          (Math.max(180, this.scroll.clientWidth - 20) / base.width) * zoom,
+        scale: (available / base.width) * zoom,
       });
       this.sheet.style.width = `${viewport.width}px`;
       this.sheet.style.height = `${viewport.height}px`;
@@ -248,10 +380,11 @@ export class PdfReader {
       const canvas = element("canvas");
       canvas.setAttribute("aria-label", `PDF 第 ${this.page} 页`);
       const ratio = Math.min(
-        window.devicePixelRatio || 1,
-        2,
-        4096 / viewport.width,
-        4096 / viewport.height
+        Math.max(window.devicePixelRatio || 1, 1.5),
+        3,
+        8192 / viewport.width,
+        8192 / viewport.height,
+        Math.sqrt(16_777_216 / (viewport.width * viewport.height))
       );
       canvas.width = Math.floor(viewport.width * ratio);
       canvas.height = Math.floor(viewport.height * ratio);
@@ -259,14 +392,27 @@ export class PdfReader {
       canvas.style.height = `${viewport.height}px`;
       this.sheet.querySelector("canvas")!.replaceWith(canvas);
       const textContainer = element("div", "", "textLayer");
+      const content = await page.getTextContent();
+      if (revision !== this.revision || this.lifecycle.signal.aborted) return;
+      // PDF.js measures on a canvas with the PDF language. Match it explicitly:
+      // inheriting zh-CN from the site changes Latin fallback font metrics.
+      const language = content.lang || "en";
+      textContainer.lang = language;
       this.sheet.querySelector(".textLayer")!.replaceWith(textContainer);
       this.renderTask = page.render({
         canvas,
         viewport,
-        transform: [ratio, 0, 0, ratio, 0, 0],
+        transform: [
+          canvas.width / viewport.width,
+          0,
+          0,
+          canvas.height / viewport.height,
+          0,
+          0,
+        ],
       });
       this.textLayer = new pdfjs.TextLayer({
-        textContentSource: page.streamTextContent(),
+        textContentSource: { ...content, lang: language },
         container: textContainer,
         viewport,
       });
@@ -303,7 +449,7 @@ export class PdfReader {
           ? "在页面上拖动框选需要高亮的区域，Esc 退出。"
           : mode === "note"
             ? "点击页面上的位置添加批注，Esc 退出。"
-            : "选中文字后点“高亮选文”；扫描版可用框选高亮。"
+            : "选文后点“高亮选文”；点选已有标注可删除，也可在批注列表中删除。"
     );
   }
   private captureSelection() {
@@ -407,8 +553,8 @@ export class PdfReader {
     this.save();
     window.getSelection()?.removeAllRanges();
     this.setMode("select");
-    this.renderMarks();
     this.renderList();
+    this.selectAnnotation(annotation.id);
     this.root
       .querySelector<HTMLTextAreaElement>(
         `[data-note-id="${annotation.id}"] textarea`
@@ -417,6 +563,37 @@ export class PdfReader {
   }
   private save() {
     this.options.changed?.(structuredClone(this.annotations));
+  }
+  private selectAnnotation(id: string) {
+    this.selectedId = id;
+    const annotation = this.annotations.find(a => a.id === id);
+    if (annotation) this.showNotes(true);
+    this.find("[data-pdf-mark-actions]").hidden =
+      !annotation || !this.options.changed;
+    this.find("[data-pdf-selected-label]").textContent = annotation
+      ? `已选中第 ${annotation.page} 页${annotation.kind === "highlight" ? "高亮" : "批注"}`
+      : "";
+    for (const card of this.root.querySelectorAll<HTMLElement>(
+      "[data-note-id]"
+    ))
+      card.classList.toggle("is-selected", card.dataset.noteId === id);
+    this.renderMarks();
+    if (id)
+      this.root
+        .querySelector(`[data-note-id="${id}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+  }
+  private remove(id: string) {
+    if (!this.editable()) return;
+    const index = this.annotations.findIndex(a => a.id === id);
+    if (index < 0) return;
+    this.deleted = { annotation: this.annotations[index], index };
+    this.annotations.splice(index, 1);
+    this.find("[data-pdf-undo]").hidden = false;
+    this.save();
+    this.renderList();
+    this.selectAnnotation("");
+    this.status("已删除标注，可点击“撤销删除”恢复。");
   }
   private mark(rect: PdfRect, color: string, className = "") {
     const mark = element("span", "", `pdf-mark ${className}`);
@@ -443,6 +620,23 @@ export class PdfReader {
         );
         mark.dataset.annotation = annotation.id;
         mark.title = annotation.text || annotation.quote || "批注";
+        mark.classList.toggle("is-selected", annotation.id === this.selectedId);
+        mark.tabIndex = 0;
+        mark.setAttribute("role", "button");
+        mark.setAttribute(
+          "aria-label",
+          `查看第 ${annotation.page} 页${annotation.kind === "note" ? "批注" : "高亮"}`
+        );
+        mark.addEventListener("click", event => {
+          event.stopPropagation();
+          this.selectAnnotation(annotation.id);
+        });
+        mark.addEventListener("keydown", event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            this.selectAnnotation(annotation.id);
+          }
+        });
         if (annotation.kind === "note") mark.textContent = "✎";
       }
     }
@@ -453,9 +647,20 @@ export class PdfReader {
     const items = this.annotations
       .filter(a => a.documentId === this.documentId)
       .sort((a, b) => a.page - b.page);
+    this.find("[data-pdf-notes-toggle]").textContent = `批注 ${items.length}`;
     list.append(
       element("p", `本篇 PDF · ${items.length} 条批注`, "pdf-note-heading")
     );
+    if (!items.length)
+      list.append(
+        element(
+          "p",
+          this.options.changed
+            ? "还没有批注。选中文字高亮，或用框选、位置批注记录想法。添加后，可点选页面标记或使用这里的“删除”按钮。"
+            : "作者尚未添加批注。",
+          "pdf-note-empty"
+        )
+      );
     if (this.annotations.length > items.length && this.options.changed)
       list.append(
         element(
@@ -468,6 +673,7 @@ export class PdfReader {
       const card = element("div", "", "pdf-note");
       card.dataset.noteId = annotation.id;
       card.dataset.color = annotation.color;
+      card.classList.toggle("is-selected", annotation.id === this.selectedId);
       const header = element("div", "", "pdf-note-actions");
       const jump = element(
         "button",
@@ -476,21 +682,16 @@ export class PdfReader {
       jump.type = "button";
       jump.addEventListener("click", () => {
         this.go(annotation.page);
+        this.selectAnnotation(annotation.id);
         this.scroll.scrollIntoView({ block: "nearest" });
       });
       header.append(jump);
       if (this.options.changed) {
-        const remove = element("button", "删除");
+        const remove = element("button", "删除", "pdf-note-delete");
         remove.type = "button";
         remove.setAttribute("aria-label", `删除第 ${annotation.page} 页批注`);
         remove.addEventListener("click", () => {
-          if (!this.editable()) return;
-          this.annotations = this.annotations.filter(
-            a => a.id !== annotation.id
-          );
-          this.save();
-          this.renderMarks();
-          this.renderList();
+          this.remove(annotation.id);
         });
         header.append(remove);
       }
@@ -519,6 +720,7 @@ export class PdfReader {
     }
   }
   destroy() {
+    this.collapse();
     this.lifecycle.abort();
     ++this.revision;
     this.observer.disconnect();

@@ -940,6 +940,14 @@ collectionEditor = new CollectionEditor({
     $<HTMLTextAreaElement>("document-title").value = value;
     $("document-title").dispatchEvent(new Event("input"));
   },
+  description: value => {
+    $<HTMLTextAreaElement>("document-description").value = value;
+    $("document-description").dispatchEvent(new Event("input"));
+  },
+  tags: value => {
+    $<HTMLInputElement>("document-tags").value = value.join(", ");
+    $("document-tags").dispatchEvent(new Event("input"));
+  },
   cover: renderCover,
   error: showError,
   busy: () => busy,
