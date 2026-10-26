@@ -5,6 +5,7 @@ import { getAssetPath } from "@/utils/withBase";
 import SiteIcons from "@/components/SiteIcons.astro";
 import StudioEntryPanel from "@/components/StudioEntryPanel.astro";
 import StudioLibraryTools from "@/components/StudioLibraryTools.astro";
+import StudioEntryDialog from "@/components/StudioEntryDialog.astro";
 import PdfReader from "@/components/PdfReader.astro";
 import "@/styles/global.css";
 import "@/styles/studio.css";
@@ -117,6 +118,15 @@ import "@/styles/studio-writing.css";
               id="focus-writing"
               class="studio-text-button"
               aria-pressed="false">专注</button
+            >
+            <button id="edit-entry-info" class="studio-text-button"
+              >修改信息</button
+            >
+            <button
+              id="paper-notes-toggle"
+              class="studio-text-button"
+              aria-pressed="false"
+              hidden>独立笔记</button
             >
             <details id="publish-options" class="publish-options">
               <summary>发布选项</summary>
@@ -263,6 +273,7 @@ import "@/styles/studio-writing.css";
             hidden
           >
             <div>
+              <strong id="paper-reader-title"></strong>
               <a
                 id="paper-reader-link"
                 target="_blank"
@@ -400,6 +411,7 @@ import "@/styles/studio-writing.css";
       hidden
     />
     <StudioLibraryTools />
+    <StudioEntryDialog />
     <dialog id="connect-dialog" class="studio-dialog">
       <form id="connect-form">
         <button

@@ -135,6 +135,7 @@ export async function readPaperMetadata(
       .match(
         /(?:published|copyright|\u00a9)[^\n]{0,70}?\b((?:19|20)\d{2})\b/i
       )?.[1] ||
+    text.match(/arXiv:[^\n]{0,100}?\b((?:19|20)\d{2})\b/i)?.[1] ||
     "";
   const year = date.match(/\b(?:19|20)\d{2}\b/)?.[0] || "";
   const keywords = (clean(fields.Keywords) || field("dc:subject"))

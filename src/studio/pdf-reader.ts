@@ -1,15 +1,12 @@
-import * as pdfjs from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { pdfjs, openPdf, readPdfBytes, pdfError } from "./pdf-document";
 import {
   normalizeAnnotations,
   pdfPreviewUrl,
   type PdfAnnotation,
   type PdfRect,
 } from "@/data/entries";
-import { getAssetPath } from "@/utils/withBase";
 import { readPaperMetadata, type PaperMetadata } from "./pdf-metadata";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const element = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
   text = "",
@@ -259,45 +256,21 @@ export class PdfReader {
     this.find(".pdf-annotations").replaceChildren();
     this.status("正在加载 PDF…");
     try {
-      const response = await fetch(this.options.url, {
-        credentials: "omit",
-        signal: AbortSignal.any([
-          this.lifecycle.signal,
-          AbortSignal.timeout(30_000),
-        ]),
-      });
-      if (!response.ok || !response.body) throw new Error("PDF 暂时无法读取。");
-      const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > 20 * 1024 * 1024) {
-          await reader.cancel();
-          throw new Error("PDF 超过 20 MB，请压缩后上传。");
+      const bytes = await readPdfBytes(
+        this.options.url,
+        this.lifecycle.signal,
+        (size, total) => {
+          this.status(
+            `正在下载 PDF… ${total ? `${Math.round((size / total) * 100)}%` : `${(size / 1024 / 1024).toFixed(1)} MB`}`
+          );
         }
-        chunks.push(value);
-      }
-      const bytes = new Uint8Array(size);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.length;
-      }
+      );
       const digest = await crypto.subtle.digest("SHA-256", bytes);
       this.documentId = Array.from(new Uint8Array(digest), byte =>
         byte.toString(16).padStart(2, "0")
       ).join("");
       this.lifecycle.signal.throwIfAborted();
-      this.loading = pdfjs.getDocument({
-        data: bytes,
-        cMapUrl: getAssetPath("pdfjs/cmaps/"),
-        cMapPacked: true,
-        standardFontDataUrl: getAssetPath("pdfjs/standard_fonts/"),
-        wasmUrl: getAssetPath("pdfjs/wasm/"),
-      });
+      this.loading = openPdf(bytes);
       this.pdf = await this.loading.promise;
       this.lifecycle.signal.throwIfAborted();
       this.find<HTMLInputElement>("[data-pdf-page]").max = String(
@@ -318,11 +291,7 @@ export class PdfReader {
       await this.draw();
     } catch (error) {
       if (this.lifecycle.signal.aborted) return;
-      this.status(
-        error instanceof Error && error.message.includes("20 MB")
-          ? error.message
-          : "无法开启批注：链接可能限制跨域读取，或 PDF 已加密/损坏。请上传可正常打开的 PDF 后重试；已保存的批注不会丢失。"
-      );
+      this.status(`${pdfError(error)} 已保存的批注不会丢失。`);
       this.scroll.hidden = true;
       this.find("[data-pdf-retry]").hidden = false;
       this.find(".pdf-fallback").hidden = false;

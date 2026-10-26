@@ -25,6 +25,7 @@ import {
   saveDocument,
 } from "./storage";
 import { GitHubClient, GitHubError, type RemoteFile } from "./github";
+import { EntryDialog } from "./entry-dialog";
 import { CollectionEditor } from "./collections";
 import { normalizeEntry } from "@/data/entries";
 import { requestedPost } from "./navigation";
@@ -66,6 +67,7 @@ const assetUrls = new Map<string, string>();
 const assets = new Map<string, WritingAsset>();
 let collectionEditor: CollectionEditor;
 let libraryTools: LibraryTools;
+let entryDialog: EntryDialog;
 let pendingEditPath: string | null = null;
 
 function finishRequestedPost() {
@@ -545,6 +547,8 @@ async function openDocument(doc: WritingDocument, savePrevious = true) {
   if (savePrevious) await saveLocal();
   loading = true;
   try {
+    document.body.classList.remove("paper-notes-writing");
+    $("paper-notes-toggle").setAttribute("aria-pressed", "false");
     current = structuredClone(doc);
     current.entry = normalizeEntry(current.entry);
     slugEdited = Boolean(doc.slug);
@@ -585,6 +589,7 @@ async function openDocument(doc: WritingDocument, savePrevious = true) {
 }
 async function openRemote(file: RemoteFile, forceReload = false) {
   if (!client || !guardSwitch()) return;
+  await saveLocal();
   const cached = documents.find(doc => doc.path === file.path);
   if (cached && !forceReload) {
     await openDocument(cached);
@@ -629,7 +634,7 @@ function setBusy(value: boolean) {
 }
 async function synchronize(publishState?: boolean) {
   clearTimeout(syncTimer);
-  if (busy) return;
+  if (busy || entryDialog?.isOpen) return;
   if (!client) {
     $<HTMLDialogElement>("connect-dialog").showModal();
     toast("连接 GitHub 后，就能同步这篇记录。");
@@ -953,15 +958,46 @@ collectionEditor = new CollectionEditor({
   busy: () => busy,
 });
 
+entryDialog = new EntryDialog({
+  accept: async (doc, pdf) => {
+    if (!guardSwitch()) throw new Error("正在同步，请稍后保存信息。");
+    if (pdf)
+      doc.entry.paper.pdfUrl = await storeAsset({
+        path: `${studioConfig.documentsDirectory}/${crypto.randomUUID()}.pdf`,
+        blob: pdf,
+        width: 0,
+        height: 0,
+      });
+    await openDocument(doc);
+    changed();
+    await saveLocal();
+    if (doc.category !== "paper-reading") editor.commands.focus("end");
+    toast("记录已保存在本机，发布后更新网站。");
+  },
+});
+
+async function openLibraryTarget(target: LibraryTarget) {
+  await saveLocal();
+  if (target.remote && target.path && target.sha)
+    await openRemote({ path: target.path, sha: target.sha });
+  else {
+    const doc = documents.find(item => item.id === target.id);
+    if (!doc) throw new Error("这篇本机记录已不存在，请刷新文章库。");
+    await openDocument(doc);
+  }
+}
+function editEntryInfo() {
+  if (!guardSwitch()) return;
+  clearTimeout(syncTimer);
+  entryDialog.open(snapshot(), "edit");
+}
+
 libraryTools = new LibraryTools({
   available: () => !loading && guardSwitch(),
-  open: async target => {
-    if (target.remote && target.path && target.sha)
-      await openRemote({ path: target.path, sha: target.sha });
-    else {
-      const doc = documents.find(item => item.id === target.id);
-      if (doc) await openDocument(doc);
-    }
+  open: openLibraryTarget,
+  info: async target => {
+    await openLibraryTarget(target);
+    editEntryInfo();
   },
   read: async target => {
     await saveLocal();
@@ -1178,13 +1214,20 @@ listen("document-line-height", "change", () => {
   editor.view.dom.style.lineHeight = lineHeight();
   changed();
 });
-async function createEntry() {
+function createEntry() {
   if (!guardSwitch()) return;
-  const doc = newDocument(current.category);
-  await openDocument(doc);
-  await saveLocal();
-  input("document-title").focus();
+  clearTimeout(syncTimer);
+  entryDialog.open(newDocument(current.category), "create");
 }
+listen("edit-entry-info", "click", editEntryInfo);
+listen("paper-notes-toggle", "click", () => {
+  const visible = document.body.classList.toggle("paper-notes-writing");
+  $("paper-notes-toggle").setAttribute("aria-pressed", String(visible));
+  if (visible) {
+    setMode(false);
+    editor.commands.focus("end");
+  }
+});
 listen("new-document", "click", createEntry);
 listen("new-entry", "click", createEntry);
 listen("document-filter", "input", renderLibrary);

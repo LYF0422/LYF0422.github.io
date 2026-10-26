@@ -227,7 +227,12 @@ export function normalizeEntry(value?: unknown): EntryMeta {
 }
 
 export function paperFromUrl(value: string) {
-  const sourceUrl = resourceUrl(value.trim());
+  // Accept a URL copied as a Markdown link or wrapped in angle brackets.
+  const pasted = value
+    .trim()
+    .replace(/^\[[^\]]*\]\((https:\/\/[^\s]+)\)$/, "$1")
+    .replace(/^<(https:\/\/[^<>]+)>$/, "$1");
+  const sourceUrl = resourceUrl(pasted);
   if (!sourceUrl) throw new Error("请输入完整的 HTTPS 论文网址或 PDF 链接。");
   const url = new URL(sourceUrl);
   let pdfUrl =

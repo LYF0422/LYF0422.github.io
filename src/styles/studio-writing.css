@@ -398,3 +398,199 @@
     gap: 12px;
   }
 }
+
+/* Paper records open directly into the reader. Metadata lives in the shared dialog. */
+.studio-body.paper-document .paper-stage.with-paper-reader {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 18px 24px;
+}
+.paper-document .writing-toolbar,
+.paper-document .studio-tabs,
+.paper-document .writing-status,
+.paper-document #paper-reader-close,
+.paper-document:not(.paper-notes-writing) #writing-paper {
+  display: none;
+}
+.paper-document .paper-reader-pane {
+  position: static;
+}
+.paper-document .pdf-scroll {
+  height: calc(100dvh - 280px);
+  max-height: none;
+  min-height: 420px;
+}
+.paper-document #paper-reader-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.paper-document.paper-notes-writing .writing-toolbar {
+  display: flex;
+}
+.paper-document.paper-notes-writing .writing-status {
+  display: flex;
+}
+.studio-dialog.entry-dialog {
+  max-width: 720px;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 36px);
+  padding: 26px 30px;
+  overflow: auto;
+}
+.entry-dialog-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.entry-dialog h2 {
+  margin: 6px 0 0;
+  font-size: 24px;
+}
+.entry-dialog fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.entry-dialog .studio-field {
+  margin-bottom: 16px;
+}
+.entry-dialog .studio-field textarea {
+  font: inherit;
+  min-height: 76px;
+  resize: vertical;
+}
+.entry-dialog-source {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.entry-dialog-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.entry-dialog-source-actions label {
+  cursor: pointer;
+}
+.entry-dialog-source-actions a {
+  font-size: 12px;
+  color: var(--accent);
+}
+.entry-dialog-hint {
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--muted-foreground);
+}
+.entry-dialog-source .entry-dialog-hint {
+  margin: 8px 0 0;
+}
+.entry-dialog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  gap: 16px;
+}
+.entry-dialog-options {
+  margin: 8px 0 20px;
+}
+.entry-dialog-options summary {
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 14px;
+}
+.entry-dialog-options .studio-checkbox {
+  margin: 12px 0;
+}
+.entry-dialog .dialog-actions {
+  align-items: center;
+  position: sticky;
+  bottom: -26px;
+  background: var(--background);
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+.entry-dialog .dialog-actions > span {
+  margin-right: auto;
+  max-width: 55%;
+}
+#entry-dialog-error {
+  color: #b22e29;
+  font-size: 12px;
+  line-height: 1.8;
+  margin-bottom: 14px;
+}
+.entry-dialog-results {
+  display: grid;
+  gap: 5px;
+  max-height: 150px;
+  overflow: auto;
+}
+.entry-dialog-results button {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  cursor: pointer;
+}
+.entry-dialog-results button:hover {
+  background: var(--surface-hover);
+}
+@media (max-width: 700px) {
+  .studio-body.paper-document .paper-stage.with-paper-reader {
+    padding: 12px;
+  }
+  .paper-document .workspace-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .paper-document .pdf-scroll {
+    height: 65dvh;
+    min-height: 320px;
+  }
+  .entry-dialog {
+    padding: 22px 18px;
+  }
+  .entry-dialog .dialog-actions {
+    bottom: -22px;
+    flex-wrap: wrap;
+  }
+  .entry-dialog .dialog-actions > span {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+@media (min-width: 1200px) {
+  .paper-document .pdf-reader:not(.is-expanded) .pdf-reading-area {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 14px;
+  }
+  .paper-document
+    .pdf-reader.pdf-notes-open:not(.is-expanded)
+    .pdf-reading-area {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+  .paper-document .pdf-reader:not(.is-expanded) .pdf-sidebar {
+    max-height: calc(100dvh - 280px);
+    overflow: auto;
+    padding: 3px;
+  }
+  .paper-document .pdf-reader:not(.is-expanded) .pdf-annotations {
+    max-height: none;
+    overflow: visible;
+  }
+}
+.entry-dialog-source-actions label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

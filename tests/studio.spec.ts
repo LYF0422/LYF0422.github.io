@@ -660,6 +660,7 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
   await expect(page.locator("#paper-attachment-details")).not.toHaveAttribute(
     "open"
   );
+  if (!await page.locator("#writing-paper").isVisible()) await page.locator("#paper-notes-toggle").click();
   await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-authors").fill("Huang et al.");
   await page.locator("#entry-comment").fill("稀疏 IMU 的时序建模。");
@@ -692,6 +693,7 @@ test("reads arXiv beside notes, uploads a PDF, and restores the committed PDF an
     page.locator("#paper-annotation-reader [data-pdf-reader]")
   ).toHaveAttribute("data-ready", "true");
   await expect(page.locator(".tiptap")).toContainText("这篇文章的方法");
+  if (!await page.locator("#writing-paper").isVisible()) await page.locator("#paper-notes-toggle").click();
   await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-remove").click();
   await expect(page.locator("#paper-reader-pane")).not.toBeVisible();
@@ -870,7 +872,10 @@ test("organizes and deletes another local article from its context menu without 
   await page.locator("#try-writing").click();
   await write(page, "需要整理的记录", "第一篇的正文。");
   await page.locator("#new-document").click();
-  await expect(page.locator("#document-title")).toHaveValue("");
+  await expect(page.locator("#entry-dialog")).toBeVisible();
+  await page.locator("#entry-dialog-name").fill("新记录");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#entry-dialog")).toBeHidden();
   await write(page, "正在写的记录", "不要切走这篇正文。");
   const first = page
     .locator("#local-documents .document-open")
@@ -1010,6 +1015,7 @@ test("offers touch and keyboard article menus and an inline template without a r
   await expect(more).toBeFocused();
   await page.locator("#local-documents .document-open").press("Shift+F10");
   await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await expect(page.locator("#organize-dialog")).toBeVisible();
   await page.locator("#organize-category").selectOption("photo");
@@ -1031,7 +1037,10 @@ test("deletes only the selected local record, cancels safely, and does not resto
   await page.locator("#try-writing").click();
   await write(page, "保留的草稿", "这篇记录需要保留。");
   await page.locator("#new-document").click();
-  await expect(page.locator("#document-title")).toHaveValue("");
+  await expect(page.locator("#entry-dialog")).toBeVisible();
+  await page.locator("#entry-dialog-name").fill("新记录");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#entry-dialog")).toBeHidden();
   await write(page, "不需要的草稿", "这篇记录准备删除。");
   await expect(page.locator("#local-documents")).toContainText("不需要的草稿");
   page.once("dialog", dialog => dialog.dismiss());
@@ -1143,6 +1152,7 @@ test("extracts PDF paper information, collapses import controls, and saves edita
     "aria-expanded",
     "false"
   );
+  if (!await page.locator("#writing-paper").isVisible()) await page.locator("#paper-notes-toggle").click();
   await page.locator("#paper-settings-toggle").click();
   await expect(page.locator("#paper-authors")).toBeVisible();
   await page.locator("#paper-authors").fill("My corrected author list");
@@ -1150,6 +1160,7 @@ test("extracts PDF paper information, collapses import controls, and saves edita
   await page.locator("#document-tags").fill("");
   await page.locator("#document-title").fill("My reading notes");
   await page.locator("#document-description").fill("My own introduction.");
+  if (!await page.locator("#writing-paper").isVisible()) await page.locator("#paper-notes-toggle").click();
   await page.locator("#paper-settings-toggle").click();
   await page.locator("#publish-button").click();
   await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
@@ -1199,6 +1210,7 @@ test("infers a paper title and authors from the first page while preserving a cu
   await expect(page.locator("#paper-metadata-status")).toContainText(
     "已自动读取"
   );
+  await page.locator("#paper-notes-toggle").click();
   await page.locator("#document-title").fill("");
   await page.locator("#paper-file").setInputFiles({
     name: "another-download.pdf",
@@ -1291,7 +1303,7 @@ test("keeps PDF selection aligned with canvas glyphs through zoom and large-scre
     .poll(
       async () => (await expanded.locator(".pdf-sheet").boundingBox())!.width
     )
-    .toBeGreaterThan(inlineWidth + 200);
+    .toBeGreaterThan(inlineWidth + 100);
   await expect(expanded).toHaveAttribute("data-ready", "true");
   await aligned(expanded);
   await expanded.locator("[data-pdf-page-note]").click();
@@ -1516,6 +1528,7 @@ test("supports region and position annotations on a phone and keeps marks bound 
       () => document.documentElement.scrollWidth <= innerWidth
     )
   ).toBe(true);
+  if (!await page.locator("#writing-paper").isVisible()) await page.locator("#paper-notes-toggle").click();
   await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-file").setInputFiles({
     name: "different.pdf",
@@ -1527,6 +1540,7 @@ test("supports region and position annotations on a phone and keeps marks bound 
   await expect(reader.locator(".pdf-annotations")).toContainText(
     "其他版本 PDF 的批注已保留"
   );
+  if (!await page.locator("#writing-paper").isVisible()) await page.locator("#paper-notes-toggle").click();
   await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-file").setInputFiles({
     name: "scan-again.pdf",
@@ -1560,8 +1574,9 @@ test("explains inaccessible PDF links and recovers by uploading without losing t
   await page.locator("#paper-attach").click();
   const reader = page.locator("#paper-annotation-reader [data-pdf-reader]");
   await expect(reader.locator("[data-pdf-status]")).toContainText(
-    "请上传可正常打开的 PDF"
+    "浏览器未能下载 PDF"
   );
+  if (!await page.locator("#writing-paper").isVisible()) await page.locator("#paper-notes-toggle").click();
   await page.locator("#paper-settings-toggle").click();
   await page.locator("#paper-file").setInputFiles({
     name: "reading.pdf",
@@ -1696,4 +1711,158 @@ test("shares canonical article URLs and returns to an internal listing", async (
   );
   await page.reload();
   await expect(page.locator("#back-button")).toHaveAttribute("href", "/blog/");
+});
+
+test("creates a paper in a modal from an arXiv URL and reopens its cached PDF without contacting arXiv", async ({ page }) => {
+  const api = await mockGitHub(page);
+  let downloads = 0;
+  await page.route("https://arxiv.org/**", route => {
+    downloads++;
+    expect(route.request().url()).toBe("https://arxiv.org/pdf/2406.07550");
+    return route.fulfill({contentType:"application/pdf", body:scholarlyPdf()});
+  });
+  await connect(page);
+  await write(page, "保留的笔记", "创建论文前的正文。");
+  const before = await page.locator("#local-documents .document-open").count();
+  await page.locator("#new-entry").click();
+  await expect(page.locator("#entry-dialog")).toBeVisible();
+  await expect(page.locator("#document-title")).toHaveValue("保留的笔记");
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("[论文](https://arxiv.org/pdf/2406.07550)");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("Learning Motion from Sparse Sensors");
+  await expect(page.locator("#entry-dialog-authors")).toHaveValue("Alice Example, Bob Researcher");
+  await expect(page.locator("#entry-dialog-year")).toHaveValue("2024");
+  await expect(page.locator("#entry-dialog-description")).toHaveValue(/We study temporal models/);
+  await expect(page.locator("#entry-dialog-save")).toBeEnabled();
+  await page.locator("#entry-dialog-save").click();
+  const reader = page.locator("#paper-annotation-reader [data-pdf-reader]");
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(page.locator("#writing-paper")).toBeHidden();
+  await expect(page.locator("#writing-toolbar")).toBeHidden();
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(before + 1);
+  await reader.locator("[data-pdf-page-note]").click();
+  await reader.locator(".pdf-note textarea").fill("批注应该保留。");
+  await page.locator("#local-documents .document-open").filter({hasText:"Learning Motion"}).click({button:"right"});
+  await page.getByRole("menuitem", {name:"修改文章信息…", exact:true}).click();
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("Learning Motion from Sparse Sensors");
+  await page.locator("#entry-dialog-name").fill("修改后的论文笔记");
+  await page.locator("#entry-dialog-authors").fill("Corrected Author");
+  await page.locator("#entry-dialog-year").fill("");
+  await page.locator("#entry-dialog-tags").fill("时序模型，IMU");
+  await page.locator("#entry-dialog-save").click();
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(reader.locator(".pdf-note textarea")).toHaveValue("批注应该保留。");
+  await page.locator("#publish-button").click();
+  await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
+  const metadata = entrySource(api.source("src/content/posts/修改后的论文笔记.md")!);
+  expect(metadata.entry.paper).toMatchObject({sourceUrl:"https://arxiv.org/abs/2406.07550", authors:"Corrected Author", year:""});
+  expect(metadata.entry.paper.pdfUrl).toMatch(/^\/documents\/studio\/.+\.pdf$/);
+  expect(metadata.entry.paper.annotations).toHaveLength(1);
+  expect([...api.files.keys()].filter(path=>path.startsWith("public/documents/studio/"))).toHaveLength(1);
+  await page.reload();
+  await expect(reader).toHaveAttribute("data-ready", "true");
+  await expect(reader.locator(".pdf-note textarea")).toHaveValue("批注应该保留。");
+  expect(downloads).toBe(1);
+  await expect(page.locator("#paper-reader-title")).toHaveText("修改后的论文笔记");
+  await page.locator("#edit-entry-info").click();
+  await expect(page.locator("#entry-dialog-year")).toHaveValue("");
+  await page.locator("#entry-dialog-name").fill("取消的修改");
+  await page.locator("#entry-dialog-cancel").click();
+  await expect(page.locator("#paper-reader-title")).toHaveText("修改后的论文笔记");
+});
+
+test("keeps the active draft when paper import fails or is canceled, and accepts a PDF instead", async ({ page }) => {
+  await page.route("https://arxiv.org/**", route=>route.abort());
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await write(page,"原文章", "不要更改这些内容。");
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-name").fill("手动标题");
+  await page.locator("#entry-dialog-source").fill("https://arxiv.org/abs/2406.07550");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-error")).toContainText("浏览器未能下载 PDF");
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("手动标题");
+  await expect(page.locator("#document-title")).toHaveValue("原文章");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"local-paper.pdf", mimeType:"application/pdf", buffer:scholarlyPdf()});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("手动标题");
+  await page.locator("#entry-dialog-cancel").click();
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(1);
+  await expect(page.locator(".tiptap")).toContainText("不要更改这些内容。");
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"local-paper.pdf", mimeType:"application/pdf", buffer:scholarlyPdf()});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+  await expect(page.locator("#writing-paper")).toBeHidden();
+});
+
+test("rejects HTML returned by a PDF URL and ignores canceled downloads without creating a record", async ({ page }) => {
+  await page.route("https://example.org/error.pdf", route=>route.fulfill({contentType:"text/html",body:"<html>A sign-in page</html>"}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://example.org/error.pdf");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-error")).toContainText("不是 PDF 文件");
+  let complete!: ()=>void;
+  const gate = new Promise<void>(resolve=>complete=resolve);
+  await page.route("https://example.org/slow.pdf",async route=>{await gate;await route.fulfill({contentType:"application/pdf",body:scholarlyPdf()}).catch(()=>{});});
+  await page.locator("#entry-dialog-source").fill("https://example.org/slow.pdf");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-save")).toBeDisabled();
+  await page.locator("#entry-dialog-cancel").click();
+  complete();
+  await page.locator("#new-entry").click();
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("");
+  await expect(page.locator("#entry-dialog-error")).toBeHidden();
+  await page.locator("#entry-dialog-category").selectOption("notes");
+  await page.locator("#entry-dialog-name").fill("普通记录");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#document-title")).toHaveValue("普通记录");
+  await expect(page.locator("#local-documents .document-open")).toHaveCount(2);
+});
+
+test("creates paper records from the dialog on a phone and restores the reader after editing metadata", async ({ page }) => {
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#toggle-library").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"paper.pdf",mimeType:"application/pdf",buffer:scholarlyPdf()});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  const dialog = page.locator("#entry-dialog");
+  expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+  await page.locator("#entry-dialog-save").click();
+  const reader=page.locator("[data-pdf-reader]");
+  await expect(reader).toHaveAttribute("data-ready","true");
+  await expect(page.locator("#writing-paper")).toBeHidden();
+  await reader.locator("[data-pdf-page-note]").click();
+  await reader.locator(".pdf-note textarea").fill("手机阅读批注。");
+  await page.locator("#edit-entry-info").click();
+  await page.locator("#entry-dialog-name").fill("手机上的论文笔记");
+  await page.locator("#entry-dialog-save").click();
+  await expect(reader).toHaveAttribute("data-ready","true");
+  await expect(reader.locator(".pdf-note textarea")).toHaveValue("手机阅读批注。");
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test("selects a work in the creation dialog without contacting Bangumi",async ({page})=>{
+  const requests=await mockCatalog(page);
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("anime");
+  await page.locator("#entry-dialog-source").fill("动画别名");
+  await page.locator("#entry-dialog-identify").click();
+  await page.locator("#entry-dialog-results button").click();
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("测试动画");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#bangumi-selected")).toContainText("测试动画");
+  expect(requests.some(url=>url.startsWith("external:"))).toBe(false);
 });

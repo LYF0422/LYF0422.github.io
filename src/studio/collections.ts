@@ -581,6 +581,11 @@ export class CollectionEditor {
     const paper = this.entry.paper;
     const src = paper.pdfUrl || paper.sourceUrl;
     const active = this.doc.category === "paper-reading" && Boolean(src);
+    const readingOnly = active && this.reading;
+    document.body.classList.toggle("paper-document", readingOnly);
+    $("paper-notes-toggle").hidden = !readingOnly;
+    $("paper-reader-title").textContent =
+      this.doc.title || paper.title || "论文阅读";
     $("paper-reader-pane").hidden = !active || !this.reading;
     $("paper-reader-pane").parentElement?.classList.toggle(
       "with-paper-reader",

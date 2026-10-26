@@ -14,6 +14,7 @@ export interface ArticleOrganization {
 interface Context {
   available: () => boolean;
   open: (target: LibraryTarget) => Promise<void>;
+  info: (target: LibraryTarget) => Promise<void>;
   read: (
     target: LibraryTarget
   ) => Promise<ArticleOrganization & { title: string }>;
@@ -53,13 +54,15 @@ export class LibraryTools {
       const task =
         action === "open"
           ? context.open(target)
-          : action === "metadata"
-            ? this.organize(target)
-            : action === "local" && target.id
-              ? context.removeLocal(target.id)
-              : action === "remote"
-                ? context.removeRemote(target)
-                : Promise.resolve();
+          : action === "info"
+            ? context.info(target)
+            : action === "metadata"
+              ? this.organize(target)
+              : action === "local" && target.id
+                ? context.removeLocal(target.id)
+                : action === "remote"
+                  ? context.removeRemote(target)
+                  : Promise.resolve();
       void task.catch(context.error);
     });
     document.addEventListener("pointerdown", event => {
