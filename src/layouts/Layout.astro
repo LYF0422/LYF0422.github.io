@@ -2,6 +2,7 @@
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import { getRelativeLocaleUrl } from "astro:i18n";
+import SiteIcons from "@/components/SiteIcons.astro";
 import { resolveDefaultOgImagePath } from "@/utils/resolveDefaultOgImagePath";
 import { getAssetPath } from "@/utils/withBase";
 import config from "@/config";
@@ -39,8 +40,7 @@ const rssHref = getRelativeLocaleUrl(
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" type="image/png" href={getAssetPath("favicon.png")} />
-    <link rel="apple-touch-icon" href={getAssetPath("apple-touch-icon.png")} />
+    <SiteIcons />
     <link rel="canonical" href={canonicalURL} />
     <meta name="generator" content={Astro.generator} />
 

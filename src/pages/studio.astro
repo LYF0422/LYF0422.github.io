@@ -2,6 +2,7 @@
 import { categories } from "@/data/categories";
 import { studioConfig } from "@/data/studio";
 import { getAssetPath } from "@/utils/withBase";
+import SiteIcons from "@/components/SiteIcons.astro";
 import StudioEntryPanel from "@/components/StudioEntryPanel.astro";
 import StudioLibraryTools from "@/components/StudioLibraryTools.astro";
 import PdfReader from "@/components/PdfReader.astro";
@@ -23,8 +24,7 @@ import "@/styles/studio-writing.css";
       content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; connect-src 'self' blob: https:; frame-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>Writing Studio · Yifan's Space</title>
-    <link rel="icon" type="image/png" href={getAssetPath("favicon.png")} />
-    <link rel="apple-touch-icon" href={getAssetPath("apple-touch-icon.png")} />
+    <SiteIcons />
   </head>
   <body class="studio-body" data-pagefind-ignore="all">
     <header class="studio-header">

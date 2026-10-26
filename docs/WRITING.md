@@ -71,6 +71,8 @@ cover: /images/my-photo.jpg
 
 头像文件为 `public/images/avatar.webp` 和 `public/images/avatar-small.webp`，分别用于主图与导航栏。社交链接在 `astro-paper.config.ts` 中配置。
 
+浏览器标签页图标与页面头像分别设置。替换上述网站图标文件并部署后，普通页面和工作台会自动使用带有图片内容版本号的图标地址，避免浏览器继续使用旧图标缓存。
+
 ## 本地查看
 
 ```sh

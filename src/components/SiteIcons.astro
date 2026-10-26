@@ -1,0 +1,20 @@
+---
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { getAssetPath } from "@/utils/withBase";
+
+async function versionedIcon(path: string) {
+  const image = await readFile(`public/${path}`);
+  // Browsers keep a separate favicon cache; change the URL when its content changes.
+  const version = createHash("sha256").update(image).digest("hex").slice(0, 12);
+  return `${getAssetPath(path)}?v=${version}`;
+}
+
+const [favicon, touchIcon] = await Promise.all([
+  versionedIcon("favicon.png"),
+  versionedIcon("apple-touch-icon.png"),
+]);
+---
+
+<link rel="icon" type="image/png" href={favicon} />
+<link rel="apple-touch-icon" href={touchIcon} />
