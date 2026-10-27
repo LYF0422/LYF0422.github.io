@@ -10,6 +10,7 @@ import {
 } from "./paper-imports";
 import { getAssetPath } from "@/utils/withBase";
 import type { PaperMetadata } from "./pdf-metadata";
+import { PaperSourceError, resolvePaperSource } from "./paper-source";
 
 const $ = <T extends HTMLElement = HTMLElement>(name: string) =>
   document.getElementById(`entry-dialog-${name}`) as T;
@@ -238,15 +239,20 @@ export class EntryDialog {
     try {
       if (this.category === "paper-reading") {
         const paper = value ? paperFromUrl(value) : null;
+        let resolvedBytes: Uint8Array<ArrayBuffer> | undefined;
         const original = $<HTMLAnchorElement>("original");
         if (paper) {
           original.href = paper.sourceUrl;
           original.hidden = false;
         }
-        if (!file && !paper?.pdfUrl)
-          throw new Error(
-            "暂时无法从这个网页定位 PDF。请提供 PDF 下载链接，或下载论文后上传文件。"
-          );
+        if (!file && paper && !paper.pdfUrl) {
+          $("import-status").textContent = "正在从论文网页查找 PDF…";
+          const resolved = await resolvePaperSource(value, request.signal);
+          paper.pdfUrl = resolved.pdfUrl;
+          resolvedBytes = resolved.bytes;
+        }
+        if (!file && !paper)
+          throw new Error("请输入完整的 HTTPS 论文网址或 PDF 链接。");
         const { readPdfBytes, openPdf } = await import("./pdf-document");
         this.pdfPath = undefined;
         let source: Blob | string = file || paper!.pdfUrl;
@@ -279,15 +285,13 @@ export class EntryDialog {
             $("import-status").textContent = "正在读取站内缓存的 PDF…";
           }
         }
-        const bytes = await readPdfBytes(
-          source,
-          request.signal,
-          (size, total) => {
+        const bytes =
+          resolvedBytes ||
+          (await readPdfBytes(source, request.signal, (size, total) => {
             if (this.request !== request) return;
             $("import-status").textContent =
               `正在下载 PDF… ${total ? `${Math.round((size / total) * 100)}%` : `${(size / 1024 / 1024).toFixed(1)} MB`}`;
-          }
-        );
+          }));
         const blob = new Blob([bytes.slice().buffer], {
           type: "application/pdf",
         });
@@ -373,7 +377,8 @@ export class EntryDialog {
         !(
           error instanceof Error &&
           /暂时无法从|请输入|GitHub|校验|有效的|目前支持/.test(error.message)
-        )
+        ) &&
+        !(error instanceof PaperSourceError)
       ) {
         const { pdfError } = await import("./pdf-document");
         message = pdfError(error);

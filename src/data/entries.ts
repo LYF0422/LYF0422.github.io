@@ -230,8 +230,15 @@ export function paperFromUrl(value: string) {
   // Accept a URL copied as a Markdown link or wrapped in angle brackets.
   const pasted = value
     .trim()
-    .replace(/^\[[^\]]*\]\((https:\/\/[^\s]+)\)$/, "$1")
-    .replace(/^<(https:\/\/[^<>]+)>$/, "$1");
+    .replace(
+      /^\[[^\]]*\]\(\s*(https?:\/\/[^\s]+?)(?:\s+["'][^"']*["'])?\s*\)$/,
+      "$1"
+    )
+    .replace(/^<(https?:\/\/[^<>]+)>$/, "$1")
+    .replace(
+      /^http:\/\/((?:(?:www|export)\.)?arxiv\.org)(?=\/|$)/i,
+      "https://$1"
+    );
   const sourceUrl = resourceUrl(pasted);
   if (!sourceUrl) throw new Error("请输入完整的 HTTPS 论文网址或 PDF 链接。");
   const url = new URL(sourceUrl);
@@ -242,15 +249,37 @@ export function paperFromUrl(value: string) {
   if (/^(?:www\.|export\.)?arxiv\.org$/.test(url.hostname)) {
     const id = url.pathname
       .replace(/^\/(?:abs|pdf|html)\//, "")
-      .replace(/\.pdf$/, "");
+      .replace(/\/+$/, "")
+      .replace(/\.pdf$/i, "");
     if (/^(?:\d{4}\.\d{4,5}|[a-z-]+\/\d{7})(?:v\d+)?$/i.test(id)) {
       pdfUrl = `https://arxiv.org/pdf/${id}`;
       return { sourceUrl: `https://arxiv.org/abs/${id}`, pdfUrl };
     }
+    throw new Error(
+      "请输入有效的 arXiv 论文网址，例如 https://arxiv.org/abs/2406.07550。"
+    );
   }
   if (url.hostname === "openreview.net" && url.searchParams.has("id"))
     pdfUrl = `https://openreview.net/pdf?id=${encodeURIComponent(url.searchParams.get("id")!)}`;
-  if (url.hostname === "aclanthology.org" && /^\/[\w.-]+\/$/.test(url.pathname))
-    pdfUrl = `${sourceUrl.replace(/\/$/, "")}.pdf`;
+  if (
+    url.hostname === "aclanthology.org" &&
+    /^\/[\w.-]+\/?$/.test(url.pathname) &&
+    !pdfUrl
+  )
+    pdfUrl = `${url.origin}${url.pathname.replace(/\/$/, "")}.pdf`;
+  if (
+    url.hostname === "openaccess.thecvf.com" &&
+    /\/html\/[^/]+\.html$/i.test(url.pathname)
+  )
+    pdfUrl = `${url.origin}${url.pathname.replace(/\/html\//, "/papers/").replace(/\.html$/i, ".pdf")}`;
+  if (
+    /^(?:papers\.(?:neurips|nips)\.cc)$/.test(url.hostname) &&
+    /\/hash\/[^/]+-Abstract(?:-Conference)?\.html$/i.test(url.pathname)
+  )
+    pdfUrl = `${url.origin}${url.pathname.replace(/\/hash\//, "/file/").replace(/-Abstract(-Conference)?\.html$/i, "-Paper$1.pdf")}`;
+  if (url.hostname === "proceedings.mlr.press") {
+    const match = url.pathname.match(/^\/(v\d+)\/([^/]+)\.html$/);
+    if (match) pdfUrl = `${url.origin}/${match[1]}/${match[2]}/${match[2]}.pdf`;
+  }
   return { sourceUrl, pdfUrl };
 }

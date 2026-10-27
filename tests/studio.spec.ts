@@ -1999,3 +1999,124 @@ test("rejects a corrupted server PDF before saving it",async({page})=>{
   await page.locator("#entry-dialog-cancel").click();
   await expect(page.locator("#local-documents .document-open")).toHaveCount(1);
 });
+
+for (const [source, pdf] of [
+  ["<http://arxiv.org/abs/2406.07550/>", "https://arxiv.org/pdf/2406.07550"],
+  ["https://arxiv.org/html/2406.07550.pdf/?download=1", "https://arxiv.org/pdf/2406.07550"],
+  ["https://openaccess.thecvf.com/content/CVPR2024/html/Example_Test_CVPR_2024_paper.html", "https://openaccess.thecvf.com/content/CVPR2024/papers/Example_Test_CVPR_2024_paper.pdf"],
+  ["https://papers.neurips.cc/paper_files/paper/2024/hash/example-Abstract-Conference.html", "https://papers.neurips.cc/paper_files/paper/2024/file/example-Paper-Conference.pdf"],
+  ["https://proceedings.mlr.press/v235/example24a.html", "https://proceedings.mlr.press/v235/example24a/example24a.pdf"],
+  ["https://aclanthology.org/2024.acl-long.1", "https://aclanthology.org/2024.acl-long.1.pdf"],
+]) {
+  test(`locates the PDF from a supported paper page: ${source}`, async ({ page }) => {
+    let downloads = 0;
+    await page.route(pdf, route => {
+      downloads++;
+      return route.fulfill({contentType: "application/pdf", body: scholarlyPdf()});
+    });
+    await page.goto("/studio/");
+    await page.locator("#try-writing").click();
+    await page.locator("#new-entry").click();
+    await page.locator("#entry-dialog-category").selectOption("paper-reading");
+    await page.locator("#entry-dialog-source").fill(source);
+    await page.locator("#entry-dialog-identify").click();
+    await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+    await expect(page.locator("#entry-dialog-name")).toHaveValue("Learning Motion from Sparse Sensors");
+    await page.locator("#entry-dialog-save").click();
+    await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready", "true");
+    expect(downloads).toBe(1);
+  });
+}
+
+test("finds a paper PDF in webpage metadata without executing or loading page content", async ({ page }) => {
+  const calls: string[] = [];
+  await page.route("https://publisher.example/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    calls.push(path);
+    if (path === "/articles/example")
+      return route.fulfill({contentType: "text/html", body: `
+        <base href="https://unwanted.example/">
+        <meta name="citation_pdf_url" content="javascript:alert(1)">
+        <meta name="citation_pdf_url" content="../downloads/main?format=pdf&amp;id=123">
+        <script>window.untrustedPaperScript = true</script>
+        <img src="https://publisher.example/unwanted-image.png">
+        <iframe src="https://publisher.example/unwanted-frame"></iframe>
+        <a href="/supplement.pdf">PDF</a>
+      `});
+    if (path === "/downloads/main")
+      return route.fulfill({contentType:"application/pdf", body:scholarlyPdf()});
+    return route.abort();
+  });
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://publisher.example/articles/example");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready", "true");
+  expect(calls).toEqual(["/articles/example", "/downloads/main"]);
+  expect(await page.evaluate(() => (window as any).untrustedPaperScript)).toBeUndefined();
+});
+
+test("follows a webpage PDF download button without treating reference links as the paper", async ({ page }) => {
+  await page.route("https://publisher.example/article", route => route.fulfill({contentType:"text/html",body:'<a href="/reference.pdf">Related study</a><a href="/download?id=123">Download PDF</a>'}));
+  await page.route("https://publisher.example/download?id=123", route => route.fulfill({contentType:"application/pdf",body:scholarlyPdf()}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://publisher.example/article");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("Learning Motion from Sparse Sensors");
+});
+
+for (const contentType of ["application/pdf", "text/plain"]) {
+  test(`imports a direct PDF without a file extension or an extra download (${contentType})`, async ({ page }) => {
+    let downloads = 0;
+    await page.route("https://publisher.example/download?id=123", route => {
+      downloads++;
+      return route.fulfill({contentType, body:scholarlyPdf()});
+    });
+    await page.goto("/studio/");
+    await page.locator("#try-writing").click();
+    await page.locator("#new-entry").click();
+    await page.locator("#entry-dialog-category").selectOption("paper-reading");
+    await page.locator("#entry-dialog-source").fill("https://publisher.example/download?id=123");
+    await page.locator("#entry-dialog-identify").click();
+    await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+    await page.locator("#entry-dialog-save").click();
+    await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready", "true");
+    expect(downloads).toBe(1);
+  });
+}
+
+test("preserves entered metadata and accepts an upload when a webpage has no public PDF", async ({ page }) => {
+  await page.route("https://publisher.example/article", route => route.fulfill({contentType:"text/html",body:'<a href="javascript:alert(1)">PDF</a><a href="/reference.pdf">Related paper</a>'}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-name").fill("保留的标题");
+  await page.locator("#entry-dialog-source").fill("https://publisher.example/article");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("已读取这个网页，但没有找到公开的 PDF");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"paper.pdf",mimeType:"application/pdf",buffer:scholarlyPdf()});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("保留的标题");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready", "true");
+});
+
+test("explains a blocked webpage request without reporting a damaged PDF", async ({ page }) => {
+  await page.route("https://publisher.example/article", route => route.abort());
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://publisher.example/article");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("浏览器无法读取这个论文网页");
+  await expect(page.locator("#entry-dialog-save")).toBeEnabled();
+});

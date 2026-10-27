@@ -18,7 +18,7 @@ export function openPdf(bytes: Uint8Array) {
 
 /** Limit the streamed body as well as Content-Length; never store an HTML error page. */
 export async function readPdfBytes(
-  source: string | Blob,
+  source: string | Blob | Response,
   signal: AbortSignal,
   progress?: (size: number, total: number) => void
 ): Promise<Uint8Array<ArrayBuffer>> {
@@ -28,10 +28,13 @@ export async function readPdfBytes(
       throw new Error("PDF 最大支持 20 MB，请压缩后上传。");
     bytes = new Uint8Array(await source.arrayBuffer());
   } else {
-    const response = await fetch(source, {
-      credentials: "omit",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]),
-    });
+    const response =
+      source instanceof Response
+        ? source
+        : await fetch(source, {
+            credentials: "omit",
+            signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]),
+          });
     if (!response.ok || !response.body)
       throw new Error(
         `PDF 下载失败（HTTP ${response.status}），请检查链接或上传 PDF。`
