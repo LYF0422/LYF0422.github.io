@@ -226,7 +226,11 @@ export function normalizeEntry(value?: unknown): EntryMeta {
   };
 }
 
-export function paperFromUrl(value: string) {
+export function paperFromUrl(value: string): {
+  sourceUrl: string;
+  pdfUrl: string;
+  doi?: string;
+} {
   // Accept a URL copied as a Markdown link or wrapped in angle brackets.
   const pasted = value
     .trim()
@@ -242,6 +246,20 @@ export function paperFromUrl(value: string) {
   const sourceUrl = resourceUrl(pasted);
   if (!sourceUrl) throw new Error("请输入完整的 HTTPS 论文网址或 PDF 链接。");
   const url = new URL(sourceUrl);
+  if (
+    url.hostname === "dl.acm.org" ||
+    /^(?:dx\.)?doi\.org$/.test(url.hostname)
+  ) {
+    const doi = decodeURIComponent(url.pathname)
+      .replace(/^\/(?:doi\/(?:(?:abs|full|pdf|epdf)\/)?)?/, "")
+      .replace(/\/+$/, "");
+    if (/^10\.1145\/[\w.;()/:+-]{1,280}$/i.test(doi))
+      return {
+        sourceUrl: `https://dl.acm.org/doi/${doi}`,
+        pdfUrl: `https://dl.acm.org/doi/pdf/${doi}`,
+        doi,
+      };
+  }
   let pdfUrl =
     /\.pdf$/i.test(url.pathname) || /\/pdf(?:\/|$)/.test(url.pathname)
       ? sourceUrl

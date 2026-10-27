@@ -11,6 +11,7 @@ import {
 import { getAssetPath } from "@/utils/withBase";
 import type { PaperMetadata } from "./pdf-metadata";
 import { PaperSourceError, resolvePaperSource } from "./paper-source";
+import { acmDownloadError, readDoiMetadata } from "./publisher-paper";
 
 const $ = <T extends HTMLElement = HTMLElement>(name: string) =>
   document.getElementById(`entry-dialog-${name}`) as T;
@@ -45,10 +46,20 @@ export class EntryDialog {
       if (this.saving) event.preventDefault();
     });
     this.dialog.addEventListener("close", () => {
+      // A queued close event must not clear a newly reopened dialog.
+      if (this.dialog.open) return;
       this.request?.abort();
       this.pdf = undefined;
       this.doc = undefined;
-      this.returnFocus?.focus();
+      // Native dialog closure already restores focus. Do not steal it after
+      // the user has started typing in another field.
+      const active = document.activeElement;
+      if (
+        active === document.body ||
+        active === this.dialog ||
+        (active && this.dialog.contains(active))
+      )
+        this.returnFocus?.focus();
     });
     $("category").addEventListener("change", () => {
       this.request?.abort();
@@ -245,6 +256,15 @@ export class EntryDialog {
           original.href = paper.sourceUrl;
           original.hidden = false;
         }
+        let publisherMetadata: PaperMetadata | null = null;
+        if (paper?.doi) {
+          this.fill("doi", paper.doi);
+          $("import-status").textContent = "正在读取论文 DOI 信息…";
+          publisherMetadata = await readDoiMetadata(paper.doi, request.signal);
+          request.signal.throwIfAborted();
+          if (this.doc !== doc || this.request !== request) return;
+          if (publisherMetadata) this.metadata(publisherMetadata);
+        }
         if (!file && paper && !paper.pdfUrl) {
           $("import-status").textContent = "正在从论文网页查找 PDF…";
           const resolved = await resolvePaperSource(value, request.signal);
@@ -287,11 +307,23 @@ export class EntryDialog {
         }
         const bytes =
           resolvedBytes ||
-          (await readPdfBytes(source, request.signal, (size, total) => {
-            if (this.request !== request) return;
-            $("import-status").textContent =
-              `正在下载 PDF… ${total ? `${Math.round((size / total) * 100)}%` : `${(size / 1024 / 1024).toFixed(1)} MB`}`;
-          }));
+          (await (async () => {
+            try {
+              return await readPdfBytes(
+                source,
+                request.signal,
+                (size, total) => {
+                  if (this.request !== request) return;
+                  $("import-status").textContent =
+                    `正在下载 PDF… ${total ? `${Math.round((size / total) * 100)}%` : `${(size / 1024 / 1024).toFixed(1)} MB`}`;
+                }
+              );
+            } catch (error) {
+              request.signal.throwIfAborted();
+              if (!file && paper?.doi) throw acmDownloadError(error);
+              throw error;
+            }
+          })());
         const blob = new Blob([bytes.slice().buffer], {
           type: "application/pdf",
         });
@@ -309,7 +341,21 @@ export class EntryDialog {
           if (this.doc !== doc || this.request !== request) return;
           this.pdf = blob;
           if (paper) doc.entry.paper.sourceUrl = paper.sourceUrl;
-          this.metadata(metadata);
+          this.metadata(
+            publisherMetadata
+              ? {
+                  ...metadata,
+                  title: publisherMetadata.title || metadata.title,
+                  authors: publisherMetadata.authors || metadata.authors,
+                  year: publisherMetadata.year || metadata.year,
+                  doi: publisherMetadata.doi || metadata.doi,
+                  abstract: publisherMetadata.abstract || metadata.abstract,
+                  keywords: publisherMetadata.keywords.length
+                    ? publisherMetadata.keywords
+                    : metadata.keywords,
+                }
+              : { ...metadata, doi: paper?.doi || metadata.doi }
+          );
           if (!field("name").value && file)
             this.fill("name", file.name.replace(/\.pdf$/i, ""));
           $("file-name").textContent =

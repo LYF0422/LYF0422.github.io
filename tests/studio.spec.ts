@@ -2120,3 +2120,107 @@ test("explains a blocked webpage request without reporting a damaged PDF", async
   await expect(page.locator("#entry-dialog-import-error")).toContainText("浏览器无法读取这个论文网页");
   await expect(page.locator("#entry-dialog-save")).toBeEnabled();
 });
+
+const acmDoi = "10.1145/3349624.3356768";
+const acmPdf = `https://dl.acm.org/doi/pdf/${acmDoi}`;
+const acmTitle = "RadHAR: Human Activity Recognition from Point Clouds Generated through a Millimeter-wave Radar";
+async function mockDoiMetadata(page: Page, doi = acmDoi) {
+  await page.route("https://api.crossref.org/works/**", route => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({message:{
+      DOI: doi, title:["RadHAR"],
+      subtitle:["Human Activity Recognition from Point Clouds Generated through a Millimeter-wave Radar"],
+      author:[{given:"Akash Deep",family:"Singh"},{given:"Sandeep Singh",family:"Sandha"}],
+      published:{"date-parts":[[2019,10,7]]},
+    }}),
+  }));
+}
+
+for (const source of [
+  `[https://dl.acm.org/doi/epdf/${acmDoi}](https://dl.acm.org/doi/epdf/${acmDoi})`,
+  `https://dl.acm.org/doi/${acmDoi}`,
+  acmPdf,
+  `https://doi.org/${acmDoi}`,
+]) {
+  test(`recognizes ACM links and imports their PDF with matching DOI information: ${source}`, async ({ page }) => {
+    await mockDoiMetadata(page);
+    const urls: string[] = [];
+    await page.route("https://dl.acm.org/**", route => {
+      urls.push(route.request().url());
+      expect(route.request().url()).toBe(acmPdf);
+      return route.fulfill({contentType:"application/pdf",body:scholarlyPdf()});
+    });
+    await page.goto("/studio/");
+    await page.locator("#try-writing").click();
+    await page.locator("#new-entry").click();
+    await page.locator("#entry-dialog-category").selectOption("paper-reading");
+    await page.locator("#entry-dialog-source").fill(source);
+    await page.locator("#entry-dialog-identify").click();
+    await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+    await expect(page.locator("#entry-dialog-name")).toHaveValue(acmTitle);
+    await expect(page.locator("#entry-dialog-year")).toHaveValue("2019");
+    await expect(page.locator("#entry-dialog-authors")).toHaveValue("Akash Deep Singh, Sandeep Singh Sandha");
+    await expect(page.locator("#entry-dialog-doi")).toHaveValue(acmDoi);
+    await expect(page.locator("#entry-dialog-github")).toBeHidden();
+    await expect(page.locator("#entry-dialog-original")).toHaveAttribute("href",`https://dl.acm.org/doi/${acmDoi}`);
+    await page.locator("#entry-dialog-save").click();
+    await expect(page.locator("#entry-dialog")).toBeHidden();
+    await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+    expect(urls).toEqual([acmPdf]);
+  });
+}
+
+test("retains DOI information and manual fields after an ACM 403, then accepts a local PDF", async ({ page }) => {
+  await mockDoiMetadata(page);
+  await page.route(acmPdf,route=>route.fulfill({status:403,contentType:"text/html",body:"<html>Please complete access verification</html>"}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await write(page,"原有笔记","保留的正文。");
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-name").fill("我的 RadHAR 阅读记录");
+  await page.locator("#entry-dialog-source").fill(`https://dl.acm.org/doi/epdf/${acmDoi}`);
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("ACM 未提供可供本站读取的 PDF（HTTP 403）");
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("我的 RadHAR 阅读记录");
+  await expect(page.locator("#entry-dialog-year")).toHaveValue("2019");
+  await expect(page.locator("#entry-dialog-doi")).toHaveValue(acmDoi);
+  await expect(page.locator("#document-title")).toHaveValue("原有笔记");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"radhar.pdf",mimeType:"application/pdf",buffer:scholarlyPdf()});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("我的 RadHAR 阅读记录");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#entry-dialog")).toBeHidden();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+});
+
+test("reports an ACM HTML verification response as an access problem", async ({ page }) => {
+  await mockDoiMetadata(page);
+  await page.route(acmPdf,route=>route.fulfill({contentType:"text/html",body:"<html>Please verify your browser</html>"}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill(`https://dl.acm.org/doi/epdf/${acmDoi}`);
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("ACM 未提供可供本站读取的 PDF");
+  await expect(page.locator("#entry-dialog-import-error")).not.toContainText("损坏");
+  await expect(page.locator("#entry-dialog-name")).toHaveValue(acmTitle);
+});
+
+for (const metadataFailure of ["unavailable", "mismatched"]) {
+  test(`imports the PDF when DOI metadata is ${metadataFailure}`, async ({ page }) => {
+    if (metadataFailure === "unavailable")
+      await page.route("https://api.crossref.org/works/**", route=>route.abort());
+    else await mockDoiMetadata(page,"10.1145/0000000.0000000");
+    await page.route(acmPdf,route=>route.fulfill({contentType:"application/pdf",body:scholarlyPdf()}));
+    await page.goto("/studio/");
+    await page.locator("#try-writing").click();
+    await page.locator("#new-entry").click();
+    await page.locator("#entry-dialog-category").selectOption("paper-reading");
+    await page.locator("#entry-dialog-source").fill(`https://dl.acm.org/doi/epdf/${acmDoi}`);
+    await page.locator("#entry-dialog-identify").click();
+    await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+    await expect(page.locator("#entry-dialog-name")).toHaveValue("Learning Motion from Sparse Sensors");
+    await expect(page.locator("#entry-dialog-doi")).toHaveValue(acmDoi);
+  });
+}
