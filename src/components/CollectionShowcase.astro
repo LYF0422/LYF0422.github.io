@@ -101,6 +101,13 @@ const cover = (post: CollectionEntry<"posts">) => {
                 post.data.entry.paper.authors && (
                   <small>{post.data.entry.paper.authors}</small>
                 )}
+              {category === "paper-reading" && post.data.entry.paper.venue && (
+                <small>
+                  {[post.data.entry.paper.venue, post.data.entry.paper.year]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </small>
+              )}
               {post.data.entry.comment && <p>{post.data.entry.comment}</p>}
             </div>
           </a>

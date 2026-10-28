@@ -16,6 +16,12 @@ import {
 import type { WritingAsset, WritingDocument } from "./model";
 import type { PdfReader } from "./pdf-reader";
 import type { PaperMetadata } from "./pdf-metadata";
+import {
+  pdfLimit,
+  pdfSizeMessage,
+  paperTextFields,
+  publicationText,
+} from "@/data/papers";
 
 interface Context {
   current: () => WritingDocument;
@@ -139,11 +145,12 @@ export class CollectionEditor {
       this.entry.paper.authors = input("paper-authors").value;
       context.changed();
     });
-    for (const field of ["year", "doi", "abstract"] as const)
+    for (const field of paperTextFields.filter(field => field !== "authors"))
       on(`paper-${field}`, "input", () => {
         this.entry.paper[field] = (
           document.getElementById(`paper-${field}`) as HTMLInputElement
         ).value;
+        this.updatePublication();
         context.changed();
       });
     on("paper-settings-toggle", "click", () => {
@@ -221,10 +228,8 @@ export class CollectionEditor {
     }
     input("paper-source").value = this.entry.paper.sourceUrl;
     input("paper-pdf").value = this.entry.paper.pdfUrl;
-    input("paper-authors").value = this.entry.paper.authors;
-    input("paper-year").value = this.entry.paper.year;
-    input("paper-doi").value = this.entry.paper.doi;
-    $<HTMLTextAreaElement>("paper-abstract").value = this.entry.paper.abstract;
+    for (const field of paperTextFields)
+      input(`paper-${field}`).value = this.entry.paper[field];
     $("paper-metadata-status").textContent = "";
     $<HTMLDetailsElement>("paper-attachment-details").open = !(
       this.entry.paper.sourceUrl || this.entry.paper.pdfUrl
@@ -546,8 +551,7 @@ export class CollectionEditor {
     this.context.changed();
   }
   private async uploadPdf(file: File) {
-    if (file.size > 20 * 1024 * 1024)
-      throw new Error("PDF 最大支持 20 MB，请压缩后再上传。");
+    if (file.size > pdfLimit) throw new Error(pdfSizeMessage);
     if (
       new TextDecoder().decode(await file.slice(0, 5).arrayBuffer()) !== "%PDF-"
     )
@@ -586,6 +590,7 @@ export class CollectionEditor {
     $("paper-notes-toggle").hidden = !readingOnly;
     $("paper-reader-title").textContent =
       this.doc.title || paper.title || "论文阅读";
+    this.updatePublication();
     $("paper-reader-pane").hidden = !active || !this.reading;
     $("paper-reader-pane").parentElement?.classList.toggle(
       "with-paper-reader",
@@ -620,6 +625,7 @@ export class CollectionEditor {
               {
                 url: resource,
                 annotations: this.entry.paper.annotations,
+                enrichMetadata: importing || !baseline.paper.title,
                 metadata: metadata => {
                   if (
                     this.doc.id !== docId ||
@@ -696,10 +702,11 @@ export class CollectionEditor {
       paper.title = metadata.title;
       changed = true;
     }
-    for (const field of ["authors", "year", "doi", "abstract"] as const) {
+    for (const field of paperTextFields) {
       if (
         !metadata[field] ||
-        (paper[field] && !(importing && paper[field] === baseline.paper[field]))
+        paper[field] !== baseline.paper[field] ||
+        (paper[field] && !importing)
       )
         continue;
       paper[field] = metadata[field];
@@ -707,6 +714,7 @@ export class CollectionEditor {
         metadata[field];
       changed = true;
     }
+    this.updatePublication();
     if (
       metadata.abstract &&
       this.doc.description === baseline.description &&
@@ -725,6 +733,11 @@ export class CollectionEditor {
         ? "已自动读取论文信息，可在这里修改。"
         : "PDF 未提供可识别的论文信息，可手动填写。";
     if (changed) this.context.changed();
+  }
+  private updatePublication() {
+    const text = publicationText(this.entry.paper);
+    $("paper-reader-publication").textContent = text;
+    $("paper-reader-publication").hidden = !text;
   }
   setPreview(preview: boolean) {
     $("entry-fields").hidden = preview || this.doc.category === "notes";

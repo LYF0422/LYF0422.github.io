@@ -4,6 +4,7 @@ import { entryStatuses } from "@/data/entries";
 import type { CategoryId } from "@/data/categories";
 import "@/styles/collections.css";
 import PdfReader from "@/components/PdfReader.astro";
+import { publicationText } from "@/data/papers";
 interface Props {
   entry: EntryMeta;
   category: CategoryId;
@@ -127,6 +128,9 @@ const paperSource = entry.paper.pdfUrl || entry.paper.sourceUrl;
             </>
           )}
         </p>
+      )}
+      {publicationText(entry.paper) && (
+        <p class="paper-credit">{publicationText(entry.paper)}</p>
       )}
       <div class="paper-source-toolbar">
         <>

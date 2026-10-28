@@ -1,5 +1,6 @@
 import { paperFromUrl, resourceUrl } from "@/data/entries";
 import { getAssetPath } from "@/utils/withBase";
+import { pdfLimit } from "@/data/papers";
 
 export interface CachedPaper {
   path: string;
@@ -36,7 +37,7 @@ export function validCachedPaper(
     /^[a-f0-9]{64}$/.test(item.sha256) &&
     Number.isSafeInteger(item.size) &&
     item.size > 0 &&
-    item.size <= 20 * 1024 * 1024
+    item.size <= pdfLimit
   );
 }
 export async function cachedArxivPaper(

@@ -1,5 +1,7 @@
 ---
 import { categories } from "@/data/categories";
+import PaperPublicationFields from "./PaperPublicationFields.astro";
+import { pdfSizeLabel } from "@/data/papers";
 ---
 
 <dialog
@@ -77,6 +79,9 @@ import { categories } from "@/data/categories";
           hidden>查看获取进度 ↗</a
         >
         <p id="entry-dialog-file-name" class="entry-dialog-hint"></p>
+        <p id="entry-dialog-file-limit" class="entry-dialog-hint">
+          单个 PDF 最大 {pdfSizeLabel}。
+        </p>
         <div id="entry-dialog-results" class="entry-dialog-results"></div>
         <p
           id="entry-dialog-import-status"
@@ -119,6 +124,7 @@ import { categories } from "@/data/categories";
         <label class="studio-field"
           >DOI<input id="entry-dialog-doi" maxlength="300" /></label
         >
+        <PaperPublicationFields prefix="entry-dialog" />
         <label class="studio-field"
           >论文摘要<textarea
             id="entry-dialog-abstract"

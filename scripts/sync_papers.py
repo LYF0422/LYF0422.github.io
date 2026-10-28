@@ -9,7 +9,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-MAX_BYTES = 20 * 1024 * 1024
+SETTINGS = json.loads((Path(__file__).resolve().parents[1] / "src/data/paper-settings.json").read_text())
+MAX_BYTES = SETTINGS["maxPdfMegabytes"] * 1024 * 1024
 ID_PATTERN = re.compile(r"(?:\d{4}\.\d{4,5}|[a-z-]+/\d{7})(?:v\d+)?", re.I)
 UUID_PATTERN = re.compile(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 ALLOWED_HOSTS = {"arxiv.org", "export.arxiv.org"}
@@ -46,13 +47,13 @@ def download(paper_id):
         f"https://arxiv.org/pdf/{paper_id}",
         headers={"User-Agent": "Yifan-Paper-Studio/1.0 (+https://lyf0422.github.io/)"},
     )
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + SETTINGS["transferTimeoutSeconds"]
     with opener.open(request, timeout=30) as response:
         if not allowed_url(response.url):
             raise ValueError("Unexpected download location")
         size = int(response.headers.get("Content-Length", "0"))
         if size > MAX_BYTES:
-            raise ValueError("PDF exceeds 20 MB")
+            raise ValueError(f"PDF exceeds {SETTINGS['maxPdfMegabytes']} MB")
         chunks, size = [], 0
         while True:
             if time.monotonic() > deadline:
@@ -62,7 +63,7 @@ def download(paper_id):
                 break
             size += len(chunk)
             if size > MAX_BYTES:
-                raise ValueError("PDF exceeds 20 MB")
+                raise ValueError(f"PDF exceeds {SETTINGS['maxPdfMegabytes']} MB")
             chunks.append(chunk)
     data = b"".join(chunks)
     if b"%PDF-" not in data[:1024]:
@@ -98,7 +99,7 @@ def fulfil(root, fetch=download):
             target = root / target_path
             cached = index["papers"].get(paper_id, {})
             data = target.read_bytes() if target.is_file() and not target.is_symlink() else b""
-            if not data or hashlib.sha256(data).hexdigest() != cached.get("sha256"):
+            if not data or len(data) > MAX_BYTES or hashlib.sha256(data).hexdigest() != cached.get("sha256"):
                 data = fetch(paper_id)
                 if len(data) > MAX_BYTES or b"%PDF-" not in data[:1024]:
                     raise ValueError("Invalid PDF download")

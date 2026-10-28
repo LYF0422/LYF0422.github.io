@@ -52,6 +52,11 @@ export interface EntryMeta {
     abstract: string;
     year: string;
     doi: string;
+    venue: string;
+    publisher: string;
+    volume: string;
+    issue: string;
+    pages: string;
     annotations: PdfAnnotation[];
   };
 }
@@ -221,6 +226,11 @@ export function normalizeEntry(value?: unknown): EntryMeta {
         /^https?:\/\/(?:dx\.)?doi\.org\//i,
         ""
       ),
+      venue: string(item.paper?.venue, 500),
+      publisher: string(item.paper?.publisher, 300),
+      volume: string(item.paper?.volume, 50),
+      issue: string(item.paper?.issue, 50),
+      pages: string(item.paper?.pages, 100),
       annotations: normalizeAnnotations(item.paper?.annotations),
     },
   };

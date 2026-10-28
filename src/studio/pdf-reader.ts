@@ -23,6 +23,7 @@ interface Options {
   canEdit?: () => boolean;
   changed?: (annotations: PdfAnnotation[]) => void;
   metadata?: (metadata: PaperMetadata) => void;
+  enrichMetadata?: boolean;
 }
 
 /** Canvas/text rendering and normalized annotation coordinates share one viewport. */
@@ -282,6 +283,12 @@ export class PdfReader {
       this.renderList();
       if (this.options.metadata) {
         void readPaperMetadata(this.pdf)
+          .then(async metadata => {
+            if (!this.options.enrichMetadata || this.lifecycle.signal.aborted)
+              return metadata;
+            const { enrichPaperMetadata } = await import("./publisher-paper");
+            return enrichPaperMetadata(metadata, this.lifecycle.signal);
+          })
           .then(metadata => {
             if (!this.lifecycle.signal.aborted)
               this.options.metadata?.(metadata);

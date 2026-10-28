@@ -1,10 +1,11 @@
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { getAssetPath } from "@/utils/withBase";
+import { pdfLimit, pdfSizeMessage, paperTransferTimeout } from "@/data/papers";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 export { pdfjs };
-export const pdfLimit = 20 * 1024 * 1024;
+export { pdfLimit } from "@/data/papers";
 
 export function openPdf(bytes: Uint8Array) {
   return pdfjs.getDocument({
@@ -24,8 +25,7 @@ export async function readPdfBytes(
 ): Promise<Uint8Array<ArrayBuffer>> {
   let bytes: Uint8Array<ArrayBuffer>;
   if (source instanceof Blob) {
-    if (source.size > pdfLimit)
-      throw new Error("PDF 最大支持 20 MB，请压缩后上传。");
+    if (source.size > pdfLimit) throw new Error(pdfSizeMessage);
     bytes = new Uint8Array(await source.arrayBuffer());
   } else {
     const response =
@@ -33,7 +33,10 @@ export async function readPdfBytes(
         ? source
         : await fetch(source, {
             credentials: "omit",
-            signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]),
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(paperTransferTimeout),
+            ]),
           });
     if (!response.ok || !response.body)
       throw new Error(
@@ -44,14 +47,12 @@ export async function readPdfBytes(
     const chunks: Uint8Array[] = [];
     let size = 0;
     try {
-      if (total > pdfLimit)
-        throw new Error("PDF 最大支持 20 MB，请压缩后上传。");
+      if (total > pdfLimit) throw new Error(pdfSizeMessage);
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > pdfLimit)
-          throw new Error("PDF 最大支持 20 MB，请压缩后上传。");
+        if (size > pdfLimit) throw new Error(pdfSizeMessage);
         chunks.push(value);
         progress?.(size, total);
       }
@@ -76,7 +77,10 @@ export async function readPdfBytes(
 }
 
 export function pdfError(error: unknown): string {
-  if (error instanceof Error && /20 MB|HTTP|不是 PDF/.test(error.message))
+  if (
+    error instanceof Error &&
+    /PDF 最大支持|HTTP|不是 PDF/.test(error.message)
+  )
     return error.message;
   if (error instanceof Error && error.name === "TimeoutError")
     return "下载 PDF 超时。可重试，或从原文下载 PDF 后上传；已填写的信息会保留。";

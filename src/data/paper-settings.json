@@ -1,0 +1,4 @@
+{
+  "maxPdfMegabytes": 100,
+  "transferTimeoutSeconds": 300
+}

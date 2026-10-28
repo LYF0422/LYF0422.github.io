@@ -1,5 +1,6 @@
 import type { PaperMetadata } from "./pdf-metadata";
 import { PaperSourceError } from "./paper-source";
+import { paperTextFields } from "@/data/papers";
 
 /** DOI metadata is public even when a publisher refuses the PDF download. */
 export async function readDoiMetadata(
@@ -51,6 +52,11 @@ export async function readDoiMetadata(
       abstract: clean(abstract.content.textContent),
       year: /^(?:19|20)\d{2}$/.test(year) ? year : "",
       doi,
+      venue: clean(data["container-title"]?.[0] || data.event?.name, 500),
+      publisher: clean(data.publisher, 300),
+      volume: clean(data.volume, 50),
+      issue: clean(data.issue, 50),
+      pages: clean(data.page || data["article-number"], 100),
       keywords: Array.isArray(data.subject)
         ? data.subject
             .map((value: unknown) => clean(value, 100))
@@ -64,9 +70,46 @@ export async function readDoiMetadata(
   }
 }
 
+export function mergePaperMetadata(
+  pdf: PaperMetadata,
+  publisher: PaperMetadata | null
+): PaperMetadata {
+  if (!publisher) return pdf;
+  const merged = {
+    ...pdf,
+    title: publisher.title || pdf.title,
+    keywords: publisher.keywords.length ? publisher.keywords : pdf.keywords,
+  };
+  for (const key of paperTextFields) merged[key] = publisher[key] || pdf[key];
+  return merged;
+}
+
+/** A DOI found in PDF text may belong to a cited work. Require its title to match. */
+export async function enrichPaperMetadata(
+  pdf: PaperMetadata,
+  signal: AbortSignal
+): Promise<PaperMetadata> {
+  if (!/^10\.\d{4,9}\/.+/.test(pdf.doi)) return pdf;
+  const publisher = await readDoiMetadata(pdf.doi, signal);
+  signal.throwIfAborted();
+  if (!publisher) return pdf;
+  const normalize = (value: string) =>
+    value
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]/gu, "");
+  const a = normalize(pdf.title),
+    b = normalize(publisher.title);
+  // Conservative containment allows a subtitle to be omitted from one source.
+  if (Math.min(a.length, b.length) < 12 || !(a.includes(b) || b.includes(a)))
+    return pdf;
+  return mergePaperMetadata(pdf, publisher);
+}
+
 /** A verification page is an access failure; changing URL syntax cannot fix it. */
 export function acmDownloadError(error: unknown): Error {
-  if (error instanceof Error && /20 MB/.test(error.message)) return error;
+  if (error instanceof Error && /PDF 最大支持/.test(error.message))
+    return error;
   const status =
     error instanceof Error ? error.message.match(/HTTP \d{3}/)?.[0] : "";
   return new PaperSourceError(

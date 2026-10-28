@@ -14,6 +14,7 @@ import {
   type ImportedPaper,
 } from "./paper-imports";
 import type { CategoryId } from "@/data/categories";
+import { paperTransferTimeout, pdfLimit, pdfSizeMessage } from "@/data/papers";
 
 export interface RemoteFile {
   path: string;
@@ -43,11 +44,12 @@ export const utf8FromBase64 = (value: string) =>
     Uint8Array.from(atob(value.replace(/\s/g, "")), char => char.charCodeAt(0))
   );
 async function blobBase64(blob: Blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000)
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1]);
+    reader.onerror = () => reject(new Error("附件读取失败，请重新选择文件。"));
+    reader.readAsDataURL(blob);
+  });
 }
 
 export class GitHubClient {
@@ -57,7 +59,8 @@ export class GitHubClient {
     path: string,
     method = "GET",
     data?: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeout = 45_000
   ): Promise<T> {
     let response: Response;
     try {
@@ -72,8 +75,8 @@ export class GitHubClient {
         },
         body: data ? JSON.stringify(data) : undefined,
         signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
-          : AbortSignal.timeout(45_000),
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+          : AbortSignal.timeout(timeout),
       });
     } catch {
       signal?.throwIfAborted();
@@ -173,8 +176,10 @@ export class GitHubClient {
       },
       signal
     );
-    progress("GitHub 正在获取论文，通常需要 1–3 分钟；可以继续填写信息。");
-    const deadline = Date.now() + 5 * 60_000;
+    progress(
+      "GitHub 正在获取论文，通常需要 1–3 分钟，大文件可能更久；可以继续填写信息。"
+    );
+    const deadline = Date.now() + 10 * 60_000;
     while (Date.now() < deadline) {
       signal.throwIfAborted();
       await new Promise<void>((resolve, reject) => {
@@ -218,14 +223,17 @@ export class GitHubClient {
         `${this.base}/git/blobs/${blobSha}`,
         "GET",
         undefined,
-        signal
+        signal,
+        paperTransferTimeout
       );
       if (data.encoding !== "base64")
         throw new Error("无法读取 GitHub 中的 PDF。");
-      const bytes = Uint8Array.from(
-        atob(data.content.replace(/\s/g, "")),
-        char => char.charCodeAt(0)
-      );
+      const bytes =
+        typeof Uint8Array.fromBase64 === "function"
+          ? Uint8Array.fromBase64(data.content)
+          : Uint8Array.from(atob(data.content.replace(/\s/g, "")), char =>
+              char.charCodeAt(0)
+            );
       if (bytes.length !== item.size)
         throw new Error("GitHub 中的 PDF 大小与记录不一致。");
       const blob = new Blob([bytes], { type: "application/pdf" });
@@ -365,11 +373,18 @@ export class GitHubClient {
         asset.path.includes("..")
       )
         throw new Error("附件路径无效。");
+      if (
+        asset.path.startsWith(`${studioConfig.documentsDirectory}/`) &&
+        asset.blob.size > pdfLimit
+      )
+        throw new Error(pdfSizeMessage);
       progress(`正在上传附件 ${tree.length + 1}…`);
       const blob = await this.request<{ sha: string }>(
         `${this.base}/git/blobs`,
         "POST",
-        { content: await blobBase64(asset.blob), encoding: "base64" }
+        { content: await blobBase64(asset.blob), encoding: "base64" },
+        undefined,
+        paperTransferTimeout
       );
       tree.push({
         path: asset.path,

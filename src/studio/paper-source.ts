@@ -1,4 +1,5 @@
 import { paperFromUrl, resourceUrl } from "@/data/entries";
+import { pdfSizeMessage, paperTransferTimeout } from "@/data/papers";
 
 /** These errors describe locating a document, before PDF parsing starts. */
 export class PaperSourceError extends Error {}
@@ -12,7 +13,10 @@ export async function resolvePaperSource(value: string, signal: AbortSignal) {
   try {
     response = await fetch(paper.sourceUrl, {
       credentials: "omit",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+      signal: AbortSignal.any([
+        signal,
+        AbortSignal.timeout(paperTransferTimeout),
+      ]),
     });
   } catch {
     signal.throwIfAborted();
@@ -54,7 +58,7 @@ export async function resolvePaperSource(value: string, signal: AbortSignal) {
       if (size > (pdf ? pdfLimit : 2 * 1024 * 1024))
         throw new PaperSourceError(
           pdf
-            ? "PDF 最大支持 20 MB，请压缩后上传。"
+            ? pdfSizeMessage
             : "论文网页内容过大，请提供 PDF 下载链接或上传 PDF。"
         );
     }

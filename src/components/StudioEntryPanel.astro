@@ -1,5 +1,7 @@
 ---
 import { entryStatuses } from "@/data/entries";
+import PaperPublicationFields from "./PaperPublicationFields.astro";
+import { pdfSizeLabel } from "@/data/papers";
 ---
 
 <fieldset id="entry-fields" class="entry-editor" hidden>
@@ -109,6 +111,7 @@ import { entryStatuses } from "@/data/entries";
           accept="application/pdf,.pdf"
           hidden
         />
+        <small>单个 PDF 最大 {pdfSizeLabel}</small>
       </div>
       <label class="entry-inline-field"
         >PDF 链接（可选）<input
@@ -137,6 +140,7 @@ import { entryStatuses } from "@/data/entries";
           /></label
         >
       </div>
+      <PaperPublicationFields prefix="paper" />
       <label class="entry-inline-field"
         >论文摘要<textarea
           id="paper-abstract"

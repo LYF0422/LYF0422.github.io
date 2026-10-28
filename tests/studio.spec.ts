@@ -14,6 +14,7 @@ const seedSource =
 const hash = (value: string) => createHash("sha1").update(value).digest("hex");
 
 test.beforeEach(async ({ page }) => {
+  await page.route("https://api.crossref.org/works/**", route => route.fulfill({status:404,contentType:"application/json",body:"{}"}));
   // Keep all tests independent of the site's evolving public paper cache.
   await page.route("**/documents/studio/arxiv/index.json", route => route.fulfill({
     contentType: "application/json", body: JSON.stringify({version:1,papers:{}}),
@@ -448,7 +449,7 @@ function testPdf(label = "Temporal models resolve ambiguity.") {
   );
 }
 
-function scholarlyPdf(embedded = true) {
+function scholarlyPdf(embedded = true, padding = 0, xmp = "") {
   const lines = [
     [20, 735, "Learning Motion from Sparse Sensors"],
     [11, 705, "Alice Example, Bob Researcher"],
@@ -482,6 +483,11 @@ function scholarlyPdf(embedded = true) {
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     "<< /Title (Learning Motion from Sparse Sensors) /Author (Alice Example, Bob Researcher) /Keywords (motion estimation; sparse sensors) >>",
   ];
+  if (xmp) {
+    objects[0] = "<< /Type /Catalog /Pages 2 0 R /Metadata 7 0 R >>";
+    objects.push(`<< /Type /Metadata /Subtype /XML /Length ${Buffer.byteLength(xmp)} >>\nstream\n${xmp}\nendstream`);
+  }
+  if (padding) objects.push(`<< /Length ${padding} >>\nstream\n${" ".repeat(padding)}\nendstream`);
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
   objects.forEach((object, index) => {
@@ -2131,6 +2137,8 @@ async function mockDoiMetadata(page: Page, doi = acmDoi) {
       subtitle:["Human Activity Recognition from Point Clouds Generated through a Millimeter-wave Radar"],
       author:[{given:"Akash Deep",family:"Singh"},{given:"Sandeep Singh",family:"Sandha"}],
       published:{"date-parts":[[2019,10,7]]},
+      "container-title":["Proceedings of the 3rd ACM Workshop on Millimeter-wave Networks and Sensing Systems"],
+      publisher:"Association for Computing Machinery",page:"51-56",
     }}),
   }));
 }
@@ -2160,6 +2168,9 @@ for (const source of [
     await expect(page.locator("#entry-dialog-year")).toHaveValue("2019");
     await expect(page.locator("#entry-dialog-authors")).toHaveValue("Akash Deep Singh, Sandeep Singh Sandha");
     await expect(page.locator("#entry-dialog-doi")).toHaveValue(acmDoi);
+    await expect(page.locator("#entry-dialog-venue")).toHaveValue("Proceedings of the 3rd ACM Workshop on Millimeter-wave Networks and Sensing Systems");
+    await expect(page.locator("#entry-dialog-publisher")).toHaveValue("Association for Computing Machinery");
+    await expect(page.locator("#entry-dialog-pages")).toHaveValue("51-56");
     await expect(page.locator("#entry-dialog-github")).toBeHidden();
     await expect(page.locator("#entry-dialog-original")).toHaveAttribute("href",`https://dl.acm.org/doi/${acmDoi}`);
     await page.locator("#entry-dialog-save").click();
@@ -2224,3 +2235,150 @@ for (const metadataFailure of ["unavailable", "mismatched"]) {
     await expect(page.locator("#entry-dialog-doi")).toHaveValue(acmDoi);
   });
 }
+
+async function mockJournalMetadata(page: Page, title = "Learning Motion from Sparse Sensors") {
+  await page.route("https://api.crossref.org/works/**", route => route.fulfill({
+    contentType:"application/json",body:JSON.stringify({message:{
+      DOI:"10.1234/sparse.2024",title:[title],author:[{given:"Alice",family:"Example"}],
+      published:{"date-parts":[[2024]]},"container-title":["Journal of Motion Research"],
+      publisher:"Example Publisher",volume:"42",issue:"3",page:"101-112",
+    }}),
+  }));
+}
+
+test("imports and publishes a 25 MB PDF with intact bytes and restores its annotations", async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  const api=await mockGitHub(page);
+  const pdf=scholarlyPdf(true,25*1024*1024);
+  const path=testInfo.outputPath("large-paper.pdf");
+  await writeFile(path,pdf);
+  await connect(page);
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-name").fill("Large paper verification");
+  await page.locator("#entry-dialog-file").setInputFiles(path);
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息",{timeout:30000});
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#entry-dialog")).toBeHidden();
+  const reader=page.locator("[data-pdf-reader]");
+  await expect(reader).toHaveAttribute("data-ready","true");
+  await reader.locator("[data-pdf-page-note]").click();
+  await reader.locator(".pdf-note textarea").fill("大文件批注。");
+  await page.locator("#publish-button").click();
+  await expect(page.locator("#sync-result")).toContainText("文章与图片已提交",{timeout:30000});
+  const data=entrySource(api.source("src/content/posts/large-paper-verification.md")!);
+  const binary=api.calls.find(call=>call.method==="POST" && call.path===`${repository}/git/blobs` && call.data.encoding==="base64")!;
+  const uploaded=Buffer.from(binary.data.content,"base64");
+  expect(uploaded.length).toBe(pdf.length);
+  expect(createHash("sha256").update(uploaded).digest("hex")).toBe(createHash("sha256").update(pdf).digest("hex"));
+  expect(data.entry.paper.annotations[0].text).toBe("大文件批注。");
+  await page.reload();
+  await expect(reader).toHaveAttribute("data-ready","true",{timeout:30000});
+  await expect(reader.locator(".pdf-note textarea")).toHaveValue("大文件批注。");
+});
+
+test("accepts a cached arXiv PDF larger than 20 MB",async({page})=>{
+  test.setTimeout(60_000);
+  const pdf=scholarlyPdf(true,21*1024*1024);
+  await page.route("https://arxiv.org/**",route=>route.abort());
+  await page.route("**/documents/studio/arxiv/index.json",route=>route.fulfill({contentType:"application/json",body:JSON.stringify({version:1,papers:{"2406.07550":{path:"/documents/studio/arxiv/2406.07550.pdf",size:pdf.length,sha256:createHash("sha256").update(pdf).digest("hex")}}})}));
+  await page.route("**/documents/studio/arxiv/2406.07550.pdf",route=>route.fulfill({contentType:"application/pdf",body:pdf}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-source").fill("https://arxiv.org/abs/2406.07550");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息",{timeout:30000});
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+});
+
+test("keeps the 100 MB limit on streamed downloads and retains entered information",async({page})=>{
+  await page.route("https://publisher.example/oversize.pdf",route=>route.fulfill({contentType:"application/pdf",headers:{"content-length":String(101*1024*1024)},body:scholarlyPdf()}));
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-name").fill("保留的标题");
+  await page.locator("#entry-dialog-source").fill("https://publisher.example/oversize.pdf");
+  await page.locator("#entry-dialog-identify").click();
+  await expect(page.locator("#entry-dialog-import-error")).toContainText("PDF 最大支持 100 MB");
+  await expect(page.locator("#entry-dialog-name")).toHaveValue("保留的标题");
+});
+
+test("reads publication fields embedded in PDF XMP when DOI lookup is unavailable",async({page})=>{
+  const xmp = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:prism="http://prismstandard.org/namespaces/basic/2.0/" xmlns:dc="http://purl.org/dc/elements/1.1/"><prism:publicationName>Embedded Journal</prism:publicationName><dc:publisher>Embedded Publisher</dc:publisher><prism:volume>12</prism:volume><prism:issueIdentifier>4</prism:issueIdentifier><prism:pageRange>20-30</prism:pageRange><prism:publicationDate>2025-03-01</prism:publicationDate></rdf:Description></rdf:RDF></x:xmpmeta>';
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"embedded.pdf",mimeType:"application/pdf",buffer:scholarlyPdf(true,0,xmp)});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await expect(page.locator("#entry-dialog-venue")).toHaveValue("Embedded Journal");
+  await expect(page.locator("#entry-dialog-publisher")).toHaveValue("Embedded Publisher");
+  await expect(page.locator("#entry-dialog-volume")).toHaveValue("12");
+  await expect(page.locator("#entry-dialog-issue")).toHaveValue("4");
+  await expect(page.locator("#entry-dialog-pages")).toHaveValue("20-30");
+  await expect(page.locator("#entry-dialog-year")).toHaveValue("2025");
+});
+
+test("fills journal information from an uploaded PDF DOI, publishes it, and preserves edits and cleared values",async({page})=>{
+  const api=await mockGitHub(page);
+  await mockJournalMetadata(page);
+  await connect(page);
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-name").fill("Journal paper verification");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"paper.pdf",mimeType:"application/pdf",buffer:scholarlyPdf()});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await expect(page.locator("#entry-dialog-venue")).toHaveValue("Journal of Motion Research");
+  await page.locator("#entry-dialog .paper-publication-fields summary").click();
+  await expect(page.locator("#entry-dialog-volume")).toHaveValue("42");
+  await expect(page.locator("#entry-dialog-issue")).toHaveValue("3");
+  await expect(page.locator("#entry-dialog-pages")).toHaveValue("101-112");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#entry-dialog")).toBeHidden();
+  await expect(page.locator("#paper-reader-publication")).toContainText("Journal of Motion Research");
+  await page.locator("#publish-button").click();
+  await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
+  expect(entrySource(api.source("src/content/posts/journal-paper-verification.md")!).entry.paper).toMatchObject({venue:"Journal of Motion Research",publisher:"Example Publisher",volume:"42",issue:"3",pages:"101-112"});
+  await page.locator("#edit-entry-info").click();
+  await page.locator("#entry-dialog-venue").fill("My corrected journal");
+  if (!await page.locator("#entry-dialog-pages").isVisible()) await page.locator("#entry-dialog .paper-publication-fields summary").click();
+  await page.locator("#entry-dialog-pages").fill("");
+  await page.locator("#entry-dialog-save").click();
+  await expect(page.locator("#entry-dialog")).toBeHidden();
+  await page.locator("#publish-button").click();
+  await expect(page.locator("#sync-result")).toContainText("文章与图片已提交");
+  await expect.poll(()=>entrySource(api.source("src/content/posts/journal-paper-verification.md")!).entry.paper).toMatchObject({venue:"My corrected journal",pages:""});
+  await expect(page.locator("#publish-button")).toBeEnabled();
+  await page.reload();
+  await expect(page.locator("[data-pdf-reader]")).toHaveAttribute("data-ready","true");
+  await page.locator("#edit-entry-info").click();
+  await expect(page.locator("#entry-dialog-venue")).toHaveValue("My corrected journal");
+  await expect(page.locator("#entry-dialog-pages")).toHaveValue("");
+});
+
+test("does not assign the venue of a different paper found through a referenced DOI",async({page})=>{
+  await mockJournalMetadata(page,"An unrelated paper about image classification");
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#new-entry").click();
+  await page.locator("#entry-dialog-category").selectOption("paper-reading");
+  await page.locator("#entry-dialog-file").setInputFiles({name:"preprint.pdf",mimeType:"application/pdf",buffer:scholarlyPdf()});
+  await expect(page.locator("#entry-dialog-import-status")).toContainText("已读取论文信息");
+  await expect(page.locator("#entry-dialog-venue")).toHaveValue("");
+  await expect(page.locator("#entry-dialog-publisher")).toHaveValue("");
+});
+
+test("fills publication metadata through the existing paper upload controls",async({page})=>{
+  await mockJournalMetadata(page);
+  await page.goto("/studio/");
+  await page.locator("#try-writing").click();
+  await page.locator("#quick-category").selectOption("paper-reading");
+  await page.locator("#paper-file").setInputFiles({name:"paper.pdf",mimeType:"application/pdf",buffer:scholarlyPdf()});
+  await expect(page.locator("#paper-venue")).toHaveValue("Journal of Motion Research");
+  await expect(page.locator("#paper-volume")).toHaveValue("42");
+  await expect(page.locator("#paper-reader-publication")).toContainText("Journal of Motion Research");
+});

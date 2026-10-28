@@ -11,7 +11,13 @@ import {
 import { getAssetPath } from "@/utils/withBase";
 import type { PaperMetadata } from "./pdf-metadata";
 import { PaperSourceError, resolvePaperSource } from "./paper-source";
-import { acmDownloadError, readDoiMetadata } from "./publisher-paper";
+import {
+  acmDownloadError,
+  readDoiMetadata,
+  mergePaperMetadata,
+  enrichPaperMetadata,
+} from "./publisher-paper";
+import { paperTextFields } from "@/data/papers";
 
 const $ = <T extends HTMLElement = HTMLElement>(name: string) =>
   document.getElementById(`entry-dialog-${name}`) as T;
@@ -117,15 +123,7 @@ export class EntryDialog {
         void this.identify(file);
       }
     });
-    for (const name of [
-      "name",
-      "description",
-      "tags",
-      "authors",
-      "year",
-      "doi",
-      "abstract",
-    ])
+    for (const name of ["name", "description", "tags", ...paperTextFields])
       $(name).addEventListener("input", () => this.edited.add(name));
     document
       .getElementById("entry-dialog-form")!
@@ -158,7 +156,7 @@ export class EntryDialog {
         : doc.entry.subject
           ? `https://bgm.tv/subject/${doc.entry.subject.id}`
           : "";
-    for (const name of ["authors", "year", "doi", "abstract"] as const)
+    for (const name of paperTextFields)
       field(name).value = doc.entry.paper[name];
     field("slug").value = doc.slug;
     field("slug").disabled = Boolean(doc.path);
@@ -193,6 +191,7 @@ export class EntryDialog {
     $("source-panel").hidden = !paper && !subject;
     $("paper-info").hidden = !paper;
     $("file-label").hidden = !paper;
+    $("file-limit").hidden = !paper;
     $("source-label").textContent = paper
       ? "论文网址或 PDF 链接"
       : "作品名称、Bangumi 网址或编号";
@@ -218,8 +217,7 @@ export class EntryDialog {
     this.fill("name", data.title);
     this.fill("description", data.abstract.slice(0, 500));
     this.fill("tags", data.keywords.join(", "));
-    for (const name of ["authors", "year", "doi", "abstract"] as const)
-      this.fill(name, data[name]);
+    for (const name of paperTextFields) this.fill(name, data[name]);
     if (this.doc)
       this.doc.entry.paper.title = data.title || field("name").value;
   }
@@ -324,7 +322,7 @@ export class EntryDialog {
               throw error;
             }
           })());
-        const blob = new Blob([bytes.slice().buffer], {
+        const blob = new Blob([bytes], {
           type: "application/pdf",
         });
         if (digest) await checkPaperDigest(blob, digest);
@@ -336,26 +334,18 @@ export class EntryDialog {
         try {
           const pdf = await task.promise;
           const { readPaperMetadata } = await import("./pdf-metadata");
-          const metadata = await readPaperMetadata(pdf);
+          const extracted = await readPaperMetadata(pdf);
+          const metadata = paper?.doi
+            ? mergePaperMetadata(
+                { ...extracted, doi: paper.doi },
+                publisherMetadata
+              )
+            : await enrichPaperMetadata(extracted, request.signal);
           request.signal.throwIfAborted();
           if (this.doc !== doc || this.request !== request) return;
           this.pdf = blob;
           if (paper) doc.entry.paper.sourceUrl = paper.sourceUrl;
-          this.metadata(
-            publisherMetadata
-              ? {
-                  ...metadata,
-                  title: publisherMetadata.title || metadata.title,
-                  authors: publisherMetadata.authors || metadata.authors,
-                  year: publisherMetadata.year || metadata.year,
-                  doi: publisherMetadata.doi || metadata.doi,
-                  abstract: publisherMetadata.abstract || metadata.abstract,
-                  keywords: publisherMetadata.keywords.length
-                    ? publisherMetadata.keywords
-                    : metadata.keywords,
-                }
-              : { ...metadata, doi: paper?.doi || metadata.doi }
-          );
+          this.metadata(metadata);
           if (!field("name").value && file)
             this.fill("name", file.name.replace(/\.pdf$/i, ""));
           $("file-name").textContent =
@@ -464,7 +454,7 @@ export class EntryDialog {
             "请先粘贴论文网址并读取，或上传 PDF。只有 PDF 可以在阅读器中批注。"
           );
         if (!source) doc.entry.paper.sourceUrl = "";
-        for (const name of ["authors", "year", "doi", "abstract"] as const)
+        for (const name of paperTextFields)
           doc.entry.paper[name] = field(name).value.trim();
         doc.entry.paper.title ||= field("name").value.trim();
       }

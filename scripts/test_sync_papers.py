@@ -51,6 +51,17 @@ class PaperImportsTest(unittest.TestCase):
                 self.assertIn("error", result)
                 self.assertFalse((root / pdf_path("2406.07550")).exists())
 
+    def test_accepts_pdf_larger_than_old_twenty_mb_limit(self):
+        data = PDF + b" " * (25 * 1024 * 1024)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.request(root)
+            fulfil(root, lambda _: data)
+            result = json.loads((root / f".paper-imports/results/{REQUEST_ID}.json").read_text())
+            self.assertNotIn("error", result)
+            self.assertEqual(result["size"], len(data))
+            self.assertEqual(result["sha256"], hashlib.sha256(data).hexdigest())
+
     def test_invalid_requests_never_reach_the_downloader(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

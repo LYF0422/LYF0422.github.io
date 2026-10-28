@@ -1,0 +1,59 @@
+---
+interface Props {
+  prefix: string;
+}
+const { prefix } = Astro.props;
+---
+
+<div class="paper-publication-fields">
+  <label class="studio-field"
+    >会议 / 期刊<input
+      id={`${prefix}-venue`}
+      maxlength="500"
+      placeholder="自动识别，未识别时可手动填写"
+    /></label
+  >
+  <details>
+    <summary>出版社、卷期与页码</summary>
+    <label class="studio-field"
+      >出版社<input id={`${prefix}-publisher`} maxlength="300" /></label
+    >
+    <div class="publication-numbers">
+      <label class="studio-field"
+        >卷<input id={`${prefix}-volume`} maxlength="50" /></label
+      >
+      <label class="studio-field"
+        >期<input id={`${prefix}-issue`} maxlength="50" /></label
+      >
+      <label class="studio-field"
+        >页码 / 文章编号<input id={`${prefix}-pages`} maxlength="100" /></label
+      >
+    </div>
+  </details>
+</div>
+<style>
+  .paper-publication-fields {
+    margin-block: 12px;
+  }
+  summary {
+    cursor: pointer;
+    font-size: 12px;
+    margin-bottom: 14px;
+  }
+  .publication-numbers {
+    display: grid;
+    grid-template-columns: 1fr 1fr 2fr;
+    gap: 12px;
+  }
+  input {
+    min-width: 0;
+  }
+  @media (max-width: 480px) {
+    .publication-numbers {
+      grid-template-columns: 1fr 1fr;
+    }
+    .publication-numbers > :last-child {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

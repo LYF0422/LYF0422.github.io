@@ -6,6 +6,11 @@ export interface PaperMetadata {
   abstract: string;
   year: string;
   doi: string;
+  venue: string;
+  publisher: string;
+  volume: string;
+  issue: string;
+  pages: string;
   keywords: string[];
 }
 
@@ -38,7 +43,7 @@ export async function readPaperMetadata(
     .getMetadata()
     .catch(() => ({ info: {}, metadata: null }));
   const fields = info as Record<string, unknown>;
-  const field = (name: string) => clean(metadata?.get(name));
+  const field = (name: string) => clean(metadata?.get(name.toLowerCase()));
   const page = await pdf.getPage(1);
   const content = await page.getTextContent();
   const lines: { text: string; size: number; y: number; x: number }[] = [];
@@ -143,12 +148,39 @@ export async function readPaperMetadata(
     .map(word => word.trim())
     .filter(Boolean)
     .slice(0, 8);
+  // Use publication metadata or explicit first-page publication statements.
+  // References in the body must not be mistaken for the venue of this paper.
+  const firstPageText = content.items
+    .map(item => ("str" in item ? item.str + (item.hasEOL ? "\n" : " ") : ""))
+    .join("");
+  const venue =
+    field("prism:publicationName") ||
+    firstPageText.match(
+      /Published as a (?:conference|workshop) paper at\s+([^\n]+)/i
+    )?.[1] ||
+    firstPageText.match(
+      /(?:^|\n)\s*(Proceedings of (?:the )?[^\n]{8,200})/i
+    )?.[1] ||
+    "";
   return {
     title: title.slice(0, 500),
     authors: authors.slice(0, 1000),
     abstract,
     year,
     doi,
+    venue: clean(venue).slice(0, 500),
+    publisher: field("dc:publisher").slice(0, 300),
+    volume: field("prism:volume").slice(0, 50),
+    issue: (field("prism:number") || field("prism:issueIdentifier")).slice(
+      0,
+      50
+    ),
+    pages: (
+      field("prism:pageRange") ||
+      [field("prism:startingPage"), field("prism:endingPage")]
+        .filter(Boolean)
+        .join("–")
+    ).slice(0, 100),
     keywords,
   };
 }
