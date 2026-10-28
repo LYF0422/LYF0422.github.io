@@ -10,6 +10,11 @@
       "path": "/documents/studio/arxiv/2501.09782.pdf",
       "size": 53741445,
       "sha256": "da94cc7a4ed1076f8279e83b86c67c8b06446eba73d5edc95d88038388f96520"
+    },
+    "2412.10523": {
+      "path": "/documents/studio/arxiv/2412.10523.pdf",
+      "size": 22814160,
+      "sha256": "b912628d29b0f191be9f09a5e254758aa7ec4f46284424f8044201e4f4c870b1"
     }
   }
 }
